@@ -108,6 +108,7 @@ func (s *SituationService) SendMessage(ctx context.Context, playerID, situationI
 	history = append(history, llm.Message{Role: "user", Content: text})
 	reply, err := s.llm.Chat(ctx, history)
 	if err != nil {
+		LLMErrors.Add(1)
 		slog.Error("passenger chat failed", "situation_id", situationID, "error", err)
 		reply = "Понимаю… И что вы предлагаете сделать?"
 	}

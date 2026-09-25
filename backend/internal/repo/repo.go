@@ -45,8 +45,7 @@ type Store interface {
 
 	// Refresh tokens
 	CreateRefreshToken(ctx context.Context, playerID uuid.UUID, tokenHash string, expiresAt time.Time) error
-	GetRefreshToken(ctx context.Context, tokenHash string) (playerID uuid.UUID, expiresAt time.Time, revoked bool, err error)
-	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (playerID uuid.UUID, err error)
 
 	// Situations
 	CreateSituation(ctx context.Context, s domain.Situation) (domain.Situation, error)

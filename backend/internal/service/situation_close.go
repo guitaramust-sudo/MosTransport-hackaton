@@ -140,6 +140,7 @@ func (s *SituationService) finishLoaded(ctx context.Context, sit domain.Situatio
 			Escalations: sit.Escalations, Elapsed: now.Sub(sit.CreatedAt)}
 		observed, err := s.llm.ScoreDialogue(ctx, input)
 		if err != nil {
+			LLMErrors.Add(1)
 			slog.Error("dialogue scoring failed; using missed-point fallback", "situation_id", sit.ID, "error", err)
 			observed = llm.ScoreResult{Tone: "neutral", Reasoning: "scoring fallback"}
 		}

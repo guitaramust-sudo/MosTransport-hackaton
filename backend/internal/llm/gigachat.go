@@ -136,18 +136,40 @@ func (c *GigaChatClient) ScoreDialogue(ctx context.Context, input ScoringInput) 
 }
 
 func (c *GigaChatClient) complete(ctx context.Context, payload chatRequest) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		answer, retry, err := c.completeOnce(ctx, payload)
+		if err == nil {
+			return answer, nil
+		}
+		last = err
+		if !retry || attempt == 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(200<<attempt) * time.Millisecond):
+		}
+	}
+	return "", last
+}
+
+func (c *GigaChatClient) completeOnce(ctx context.Context, payload chatRequest) (string, bool, error) {
 	token, err := c.accessToken(ctx)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/chat/completions", bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -155,37 +177,38 @@ func (c *GigaChatClient) complete(ctx context.Context, payload chatRequest) (str
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gigachat chat: %w", err)
+		return "", ctx.Err() == nil, fmt.Errorf("gigachat chat: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gigachat chat: status %d: %s", resp.StatusCode, truncate(string(body), 300))
+		if resp.StatusCode == http.StatusUnauthorized {
+			c.mu.Lock()
+			c.token = ""
+			c.mu.Unlock()
+		}
+		retry := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return "", retry, fmt.Errorf("gigachat chat: status %d: %s", resp.StatusCode, truncate(string(body), 300))
 	}
 
 	var cr chatResponse
 	if err := json.Unmarshal(body, &cr); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(cr.Choices) == 0 {
-		return "", fmt.Errorf("gigachat chat: no choices returned")
+		return "", false, fmt.Errorf("gigachat chat: no choices returned")
 	}
-	return cr.Choices[0].Message.Content, nil
+	return cr.Choices[0].Message.Content, false, nil
 }
 
 // Classify asks the model to pick exactly one category for the text.
 // Context is intentionally minimal to save tokens: only the text and the
 // list of categories are sent.
 func (c *GigaChatClient) Classify(ctx context.Context, text string, categories []string) (string, error) {
-	token, err := c.accessToken(ctx)
-	if err != nil {
-		return "", err
-	}
-
 	sys := "Ты классификатор реплик проводника поезда. Отнеси реплику ровно к одной категории из списка. " +
 		"Верни ТОЛЬКО название категории без пояснений, кавычек и лишних символов."
 	user := fmt.Sprintf("Категории: %s\nРеплика проводника: %s", strings.Join(categories, ", "), text)
@@ -199,42 +222,11 @@ func (c *GigaChatClient) Classify(ctx context.Context, text string, categories [
 		Temperature: 0,
 		MaxTokens:   16,
 	}
-	data, err := json.Marshal(payload)
+	answer, err := c.complete(ctx, payload)
 	if err != nil {
 		return "", err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("gigachat classify: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gigachat classify: status %d: %s", resp.StatusCode, truncate(string(body), 300))
-	}
-
-	var cr chatResponse
-	if err := json.Unmarshal(body, &cr); err != nil {
-		return "", err
-	}
-	if len(cr.Choices) == 0 {
-		return "", fmt.Errorf("gigachat classify: no choices")
-	}
-
-	raw := strings.TrimSpace(cr.Choices[0].Message.Content)
+	raw := strings.TrimSpace(answer)
 	for _, cat := range categories {
 		if strings.EqualFold(strings.TrimSpace(raw), cat) {
 			return cat, nil

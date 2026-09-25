@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,6 +34,9 @@ func main() {
 
 func run() error {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	catalog, err := content.Load()
 	if err != nil {
 		return fmt.Errorf("load content: %w", err)
@@ -67,7 +71,7 @@ func run() error {
 		Session:   service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations),
 		Situation: situations,
 	}
-	router := routes(h, auth)
+	router := routes(h, auth, store)
 	server := &http.Server{
 		Addr:              ":" + cfg.ServerPort,
 		Handler:           router,
@@ -103,16 +107,33 @@ func run() error {
 	}
 }
 
-func routes(h *handler.Handlers, auth *service.AuthService) http.Handler {
+func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Store) http.Handler {
 	r := chi.NewRouter()
 	r.Use(localWebCORS)
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.Recoverer)
+	r.Use(requestLogger)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	r.Post("/auth/register", h.Register)
-	r.Post("/auth/login", h.Login)
-	r.Post("/auth/refresh", h.Refresh)
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := store.Ping(ctx); err != nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
+	r.Get("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int64{"llm_errors": service.LLMErrors.Load()})
+	})
+	r.Route("/auth", func(r chi.Router) {
+		r.Use(appmiddleware.AuthRateLimit(10, time.Minute))
+		r.Post("/register", h.Register)
+		r.Post("/login", h.Login)
+		r.Post("/refresh", h.Refresh)
+	})
 	r.Route("/api", func(r chi.Router) {
 		r.Use(appmiddleware.JWTAuth(auth))
 		r.Get("/profile", h.GetProfile)
@@ -126,6 +147,17 @@ func routes(h *handler.Handlers, auth *service.AuthService) http.Handler {
 		r.Post("/situation/{id}/finish", h.FinishSituation)
 	})
 	return r
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(wrapped, r)
+		slog.Info("http request", "request_id", middleware.GetReqID(r.Context()),
+			"method", r.Method, "path", r.URL.Path, "status", wrapped.Status(),
+			"duration_ms", time.Since(started).Milliseconds())
+	})
 }
 
 // Expo web uses a separate localhost port during local development. Explicit

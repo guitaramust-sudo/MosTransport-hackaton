@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,7 +24,17 @@ type Store struct {
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database URL: %w", err)
+	}
+	poolConfig.MaxConns = 10
+	poolConfig.MaxConnLifetime = time.Hour
+	if poolConfig.ConnConfig.RuntimeParams == nil {
+		poolConfig.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	poolConfig.ConnConfig.RuntimeParams["statement_timeout"] = "30000"
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
@@ -40,6 +51,8 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 }
 
 func (s *Store) Close() { s.pool.Close() }
+
+func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 // migrate applies each numbered file once, in a single transaction. The
 // advisory lock serializes concurrent server starts against the same DB.

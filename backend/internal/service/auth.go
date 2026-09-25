@@ -73,7 +73,7 @@ func (s *AuthService) Register(ctx context.Context, email, username, password st
 		return AuthResult{}, err
 	}
 
-	tokens, err := s.issueTokens(player.ID)
+	tokens, err := s.issueTokens(ctx, player.ID)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -89,14 +89,14 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (AuthRe
 		return AuthResult{}, ErrInvalidCreds
 	}
 
-	tokens, err := s.issueTokens(player.ID)
+	tokens, err := s.issueTokens(ctx, player.ID)
 	if err != nil {
 		return AuthResult{}, err
 	}
 	return AuthResult{Player: player, Tokens: tokens}, nil
 }
 
-func (s *AuthService) issueTokens(playerID uuid.UUID) (TokenPair, error) {
+func (s *AuthService) issueTokens(ctx context.Context, playerID uuid.UUID) (TokenPair, error) {
 	access, err := s.signAccess(playerID)
 	if err != nil {
 		return TokenPair{}, err
@@ -108,7 +108,7 @@ func (s *AuthService) issueTokens(playerID uuid.UUID) (TokenPair, error) {
 	}
 	refresh := hex.EncodeToString(raw)
 
-	if err := s.store.CreateRefreshToken(context.Background(), playerID, hashRefreshToken(refresh), time.Now().Add(s.refreshTTL)); err != nil {
+	if err := s.store.CreateRefreshToken(ctx, playerID, hashRefreshToken(refresh), time.Now().Add(s.refreshTTL)); err != nil {
 		return TokenPair{}, err
 	}
 
@@ -122,22 +122,16 @@ func (s *AuthService) issueTokens(playerID uuid.UUID) (TokenPair, error) {
 // Refresh validates a refresh token, revokes it and issues a fresh pair.
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthResult, error) {
 	hash := hashRefreshToken(refreshToken)
-	playerID, expiresAt, revoked, err := s.store.GetRefreshToken(ctx, hash)
+	playerID, err := s.store.ConsumeRefreshToken(ctx, hash)
 	if err != nil {
 		return AuthResult{}, ErrInvalidToken
-	}
-	if revoked || time.Now().After(expiresAt) {
-		return AuthResult{}, ErrInvalidToken
-	}
-	if err := s.store.RevokeRefreshToken(ctx, hash); err != nil {
-		return AuthResult{}, err
 	}
 
 	player, err := s.store.GetPlayerByID(ctx, playerID)
 	if err != nil {
 		return AuthResult{}, err
 	}
-	tokens, err := s.issueTokens(playerID)
+	tokens, err := s.issueTokens(ctx, playerID)
 	if err != nil {
 		return AuthResult{}, err
 	}

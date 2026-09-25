@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -9,6 +10,7 @@ import (
 // Config holds every runtime setting, sourced from environment variables.
 type Config struct {
 	ServerPort string
+	AppEnv     string
 
 	DatabaseURL string
 
@@ -31,6 +33,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		ServerPort: env("SERVER_PORT", "8080"),
+		AppEnv:     env("APP_ENV", "development"),
 
 		DatabaseURL: env("DATABASE_URL", "postgres://vsm:vsm@localhost:5432/vsm?sslmode=disable"),
 
@@ -49,6 +52,21 @@ func Load() *Config {
 
 		SituationsPerSession: envInt("SITUATIONS_PER_SESSION", 4),
 	}
+}
+
+func (c *Config) Validate() error {
+	if c.AppEnv != "development" && c.AppEnv != "production" {
+		return fmt.Errorf("APP_ENV must be development or production")
+	}
+	if c.AppEnv == "production" {
+		if c.JWTSecret == "" || c.JWTSecret == "dev-secret-change-me" {
+			return fmt.Errorf("JWT_SECRET must be set to a unique value in production")
+		}
+		if c.GigaChatInsecure {
+			return fmt.Errorf("GIGACHAT_INSECURE is forbidden in production")
+		}
+	}
+	return nil
 }
 
 func env(key, fallback string) string {

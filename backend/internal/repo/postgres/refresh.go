@@ -18,21 +18,15 @@ func (s *Store) CreateRefreshToken(ctx context.Context, playerID uuid.UUID, toke
 	return err
 }
 
-func (s *Store) GetRefreshToken(ctx context.Context, tokenHash string) (uuid.UUID, time.Time, bool, error) {
+func (s *Store) ConsumeRefreshToken(ctx context.Context, tokenHash string) (uuid.UUID, error) {
 	var playerID uuid.UUID
-	var expiresAt time.Time
-	var revoked bool
 	err := s.pool.QueryRow(ctx,
-		`SELECT player_id, expires_at, revoked FROM refresh_tokens WHERE token = $1`, tokenHash,
-	).Scan(&playerID, &expiresAt, &revoked)
+		`UPDATE refresh_tokens SET revoked = true
+		 WHERE token = $1 AND revoked = false AND expires_at > now()
+		 RETURNING player_id`, tokenHash,
+	).Scan(&playerID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, time.Time{}, false, repo.ErrNotFound
+		return uuid.Nil, repo.ErrNotFound
 	}
-	return playerID, expiresAt, revoked, err
-}
-
-func (s *Store) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked = true WHERE token = $1`, tokenHash)
-	return err
+	return playerID, err
 }

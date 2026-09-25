@@ -43,6 +43,7 @@ go run ./cmd/server
 |---|---|---|
 | `DATABASE_URL` | `postgres://vsm:vsm@localhost:5432/vsm?sslmode=disable` | DSN PostgreSQL |
 | `SERVER_PORT` | `8080` | Порт HTTP |
+| `APP_ENV` | `development` | В `production` требуется уникальный `JWT_SECRET` и запрещён `GIGACHAT_INSECURE` |
 | `JWT_SECRET` | `dev-secret-change-me` | Секрет подписи JWT |
 | `JWT_ACCESS_TTL` | `24h` | Время жизни access-токена |
 | `JWT_REFRESH_TTL` | `720h` | Время жизни refresh-токена |
@@ -55,6 +56,13 @@ go run ./cmd/server
 | `GIGACHAT_INSECURE` | `false` | Пропуск проверки TLS (только для локальной разработки) |
 | `SITUATIONS_PER_SESSION` | `4` | Число ситуаций в смене |
 | `CORS_ORIGINS` | localhost:8081 и localhost:19006 (HTTP) | Разрешённые источники Expo web, через запятую |
+
+`GET /readyz` проверяет соединение с PostgreSQL. На `/auth/*` действует лимит
+10 запросов в минуту на адрес подключения. Запросы логируются через `slog` с
+`request_id`, HTTP-статусом и временем ответа. Вызовы GigaChat ограничены 30 с
+и повторяются при 429, 5xx и сетевых ошибках. `GET /metrics` возвращает число
+ошибок LLM как `llm_errors`. Пул PostgreSQL ограничен 10 соединениями, а SQL
+запросы — 30 секундами.
 
 ## API
 

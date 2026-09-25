@@ -23,6 +23,7 @@ services:
     environment:
       DATABASE_URL: postgres://vsm:vsm@postgres:5432/vsm?sslmode=disable
       SERVER_PORT: "8080"
+      APP_ENV: ${APP_ENV:-development}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-24h}
       LLM_MODE: ${LLM_MODE:-mock}
@@ -33,6 +34,7 @@ services:
       GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
       GIGACHAT_INSECURE: ${GIGACHAT_INSECURE:-false}
       SITUATIONS_PER_SESSION: ${SITUATIONS_PER_SESSION:-4}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081,http://localhost:19006}
     ports:
       - "8088:8080"
 

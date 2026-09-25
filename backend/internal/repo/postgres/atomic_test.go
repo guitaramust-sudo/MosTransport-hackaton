@@ -44,6 +44,23 @@ func draftSituation(deadline time.Time) domain.Situation {
 	}
 }
 
+func TestRefreshTokenCanOnlyBeConsumedOnce(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	const token = "one-time-test-token"
+	if err := store.CreateRefreshToken(ctx, playerID, token, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := store.ConsumeRefreshToken(ctx, token); results <- err }()
+	}
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) {
+		t.Fatalf("want exactly one success, got %v and %v", first, second)
+	}
+}
+
 func TestCreateSessionRollsBackPartialSituations(t *testing.T) {
 	store, playerID := integrationStore(t)
 	ctx := context.Background()
