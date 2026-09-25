@@ -26,8 +26,6 @@ type Config struct {
 	GigaChatInsecure     bool
 
 	SituationsPerSession int
-	SituationTimeout     time.Duration
-	MaxTurnsPerSituation int
 }
 
 func Load() *Config {
@@ -50,8 +48,6 @@ func Load() *Config {
 		GigaChatInsecure:     envBool("GIGACHAT_INSECURE", false),
 
 		SituationsPerSession: envInt("SITUATIONS_PER_SESSION", 4),
-		SituationTimeout:     envDuration("SITUATION_TIMEOUT", 120*time.Second),
-		MaxTurnsPerSituation: envInt("MAX_TURNS_PER_SITUATION", 3),
 	}
 }
 

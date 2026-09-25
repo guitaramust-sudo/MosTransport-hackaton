@@ -30,6 +30,7 @@ type Store interface {
 	CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error)
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
 	FinishSession(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
+	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, finishedAt time.Time) (bool, error)
 
 	// Refresh tokens
 	CreateRefreshToken(ctx context.Context, playerID uuid.UUID, tokenHash string, expiresAt time.Time) error
@@ -41,9 +42,13 @@ type Store interface {
 	GetSituation(ctx context.Context, id uuid.UUID) (domain.Situation, error)
 	ListSituationsBySession(ctx context.Context, sessionID uuid.UUID) ([]domain.Situation, error)
 	UpdateSituation(ctx context.Context, s domain.Situation) error
+	CloseSituation(ctx context.Context, s domain.Situation) (bool, error)
+	AddEscalation(ctx context.Context, situationID uuid.UUID, target string) ([]string, error)
+	ListExpiredSituationIDs(ctx context.Context, now time.Time) ([]uuid.UUID, error)
 
 	// Messages
 	CreateMessage(ctx context.Context, situationID uuid.UUID, role, content string, category *string) (domain.Message, error)
+	CreateEscalationMessage(ctx context.Context, situationID uuid.UUID, target string) error
 	ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error)
 	CountPlayerMessages(ctx context.Context, situationID uuid.UUID) (int, error)
 	UpdateMessageCategory(ctx context.Context, id int, category string) error

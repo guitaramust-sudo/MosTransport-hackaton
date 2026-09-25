@@ -86,6 +86,68 @@ func (m *MockLLM) Classify(ctx context.Context, text string, categories []string
 	return best, nil
 }
 
+func (m *MockLLM) ScoreDialogue(ctx context.Context, input ScoringInput) (ScoreResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ScoreResult{}, err
+	}
+	var playerText strings.Builder
+	for _, turn := range input.History {
+		if turn.Role == "user" {
+			playerText.WriteString(" ")
+			playerText.WriteString(strings.ToLower(turn.Content))
+		}
+	}
+	text := playerText.String()
+	result := ScoreResult{Tone: "neutral", EscalationDone: input.Escalations, Reasoning: "mock keyword scoring"}
+	if containsAny(text, "заткнись", "плевать", "идиот", "грубо") {
+		result.Tone = "rude"
+	} else if containsAny(text, "пожалуйста", "спасибо", "понимаю", "не переживайте", "помогу") {
+		result.Tone = "empathic"
+	}
+	for _, point := range input.Scenario.CorrectCompletion.MustConvey {
+		if matchesDescription(text, point.Desc) {
+			result.Conveyed = append(result.Conveyed, point.ID)
+		} else {
+			result.Missed = append(result.Missed, point.ID)
+		}
+	}
+	for _, required := range input.Scenario.CorrectCompletion.Escalation.To {
+		if !containsString(input.Escalations, required) {
+			return result, nil
+		}
+	}
+	result.EscalationOK = true
+	return result, nil
+}
+
+func containsAny(text string, terms ...string) bool {
+	for _, term := range terms {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesDescription(text, desc string) bool {
+	for _, word := range strings.Fields(strings.ToLower(desc)) {
+		word = strings.Trim(word, ",.;:!?")
+		if len([]rune(word)) >= 5 && strings.Contains(text, word) {
+			return true
+		}
+	}
+	return false
+}
+
 var _ LLMClient = (*MockLLM)(nil)
 
 func (m *MockLLM) String() string { return fmt.Sprintf("mock-llm") }

@@ -19,6 +19,13 @@ func (s *Store) CreateMessage(ctx context.Context, situationID uuid.UUID, role, 
 	return m, err
 }
 
+func (s *Store) CreateEscalationMessage(ctx context.Context, situationID uuid.UUID, target string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO messages (situation_id, role, content, kind)
+		 VALUES ($1, 'system', $2, 'escalation')`, situationID, "Вызван адресат: "+target)
+	return err
+}
+
 func (s *Store) ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, situation_id, role, content, category, created_at

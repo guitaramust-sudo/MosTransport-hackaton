@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -14,26 +15,41 @@ import (
 )
 
 type situationDTO struct {
-	ID            uuid.UUID  `json:"id"`
-	Status        string     `json:"status"`
-	Code          string     `json:"code"`
-	Name          string     `json:"name"`
-	Scenario      string     `json:"scenario"`
-	Opening       string     `json:"opening,omitempty"`
-	Loyalty       int        `json:"loyalty"`
-	Safety        int        `json:"safety"`
-	TimerDeadline *time.Time `json:"timer_deadline"`
-	Outcome       *string    `json:"outcome,omitempty"`
+	ID             uuid.UUID       `json:"id"`
+	Status         string          `json:"status"`
+	SituationDefID *string         `json:"situation_def_id,omitempty"`
+	PassengerID    *string         `json:"passenger_id,omitempty"`
+	Code           string          `json:"code"`
+	Name           string          `json:"name"`
+	Scenario       string          `json:"scenario"`
+	Opening        string          `json:"opening,omitempty"`
+	Loyalty        int             `json:"loyalty"`
+	Safety         int             `json:"safety"`
+	TimerDeadline  *time.Time      `json:"timer_deadline"`
+	Outcome        *string         `json:"outcome,omitempty"`
+	Escalations    []string        `json:"escalations"`
+	XP             int             `json:"xp"`
+	Remarks        json.RawMessage `json:"remarks,omitempty"`
+	ScoreResult    json.RawMessage `json:"score_result,omitempty"`
+	Tone           string          `json:"tone,omitempty"`
+	Conveyed       []string        `json:"conveyed,omitempty"`
+	Missed         []string        `json:"missed,omitempty"`
 }
 
 func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
 	d := situationDTO{
-		ID:            s.ID,
-		Status:        s.Status,
-		Loyalty:       s.Loyalty,
-		Safety:        s.Safety,
-		TimerDeadline: s.TimerDeadline,
-		Outcome:       s.Outcome,
+		ID:             s.ID,
+		Status:         s.Status,
+		SituationDefID: s.SituationDefID,
+		PassengerID:    s.PassengerID,
+		Loyalty:        s.Loyalty,
+		Safety:         s.Safety,
+		TimerDeadline:  s.TimerDeadline,
+		Outcome:        s.Outcome,
+		Escalations:    s.Escalations,
+		XP:             s.XP,
+		Remarks:        s.Remarks,
+		ScoreResult:    s.ScoreResult,
 	}
 	if p := s.PassengerParams; p != nil {
 		d.Code, _ = p["code"].(string)
@@ -41,6 +57,12 @@ func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
 		d.Scenario, _ = p["scenario"].(string)
 		if includeOpening {
 			d.Opening, _ = p["opening"].(string)
+		}
+	}
+	if len(s.ScoreResult) > 0 {
+		var summary service.ScoreSummary
+		if json.Unmarshal(s.ScoreResult, &summary) == nil {
+			d.Tone, d.Conveyed, d.Missed = summary.Tone, summary.Conveyed, summary.Missed
 		}
 	}
 	return d

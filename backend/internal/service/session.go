@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/mostransport/vsm-trainer/internal/content"
 	"github.com/mostransport/vsm-trainer/internal/domain"
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
@@ -16,34 +19,48 @@ var ErrSessionNotFound = errors.New("session not found")
 
 type SessionService struct {
 	store         repo.Store
+	catalog       content.Catalog
 	situationsNum int
-	timeout       time.Duration
+	situations    *SituationService
 }
 
-func NewSessionService(store repo.Store, situationsNum int, timeout time.Duration) *SessionService {
-	return &SessionService{store: store, situationsNum: situationsNum, timeout: timeout}
+func NewSessionService(store repo.Store, catalog content.Catalog, situationsNum int, situations *SituationService) *SessionService {
+	return &SessionService{store: store, catalog: catalog, situationsNum: situationsNum, situations: situations}
 }
 
 func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain.Session, []domain.Situation, error) {
+	if err := s.catalog.Validate(); err != nil {
+		return nil, nil, err
+	}
 	sess, err := s.store.CreateSession(ctx, playerID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	selected := pickArchetypes(s.situationsNum)
+	selected := pickScenarios(s.catalog.Scenarios, s.situationsNum)
 	situations := make([]domain.Situation, 0, len(selected))
-	for _, a := range selected {
-		deadline := time.Now().Add(s.timeout)
+	for _, scenario := range selected {
+		passenger := s.catalog.Passengers[rand.Intn(len(s.catalog.Passengers))]
+		deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
+		scenarioID, passengerID := scenario.ID, passenger.ID
 		params := map[string]any{
-			"code":     a.Code,
-			"name":     a.Name,
-			"persona":  a.Persona,
-			"scenario": a.Scenario,
-			"opening":  a.Opening,
+			"code":             scenario.ID,
+			"name":             passenger.ID,
+			"persona":          passenger.PromptHint,
+			"scenario":         scenario.Title,
+			"opening":          scenario.Opening,
+			"situation_def_id": scenario.ID,
+			"passenger_id":     passenger.ID,
+			"prompt_hint":      passenger.PromptHint,
+			"language":         passenger.Language,
+			"traits":           passenger.Traits,
+			"traits_text":      strings.Join(passenger.Traits, ", "),
 		}
 		sit, err := s.store.CreateSituation(ctx, domain.Situation{
 			SessionID:       sess.ID,
 			Status:          domain.SituationStatusActive,
+			SituationDefID:  &scenarioID,
+			PassengerID:     &passengerID,
 			PassengerParams: params,
 			Loyalty:         50,
 			Safety:          50,
@@ -52,7 +69,7 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, err := s.store.CreateMessage(ctx, sit.ID, domain.MessageRolePassenger, a.Opening, nil); err != nil {
+		if _, err := s.store.CreateMessage(ctx, sit.ID, domain.MessageRoleSystem, scenario.Opening, nil); err != nil {
 			return nil, nil, err
 		}
 		situations = append(situations, sit)
@@ -61,8 +78,8 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 	return &sess, situations, nil
 }
 
-func pickArchetypes(n int) []PassengerArchetype {
-	pool := append([]PassengerArchetype(nil), archetypes...)
+func pickScenarios(scenarios []content.Scenario, n int) []content.Scenario {
+	pool := append([]content.Scenario(nil), scenarios...)
 	rand.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] })
 	if n > len(pool) {
 		n = len(pool)
@@ -100,14 +117,15 @@ type Breakdown struct {
 }
 
 type SituationBreakdown struct {
-	SituationID uuid.UUID `json:"situation_id"`
-	Code        string    `json:"code"`
-	Name        string    `json:"name"`
-	Outcome     string    `json:"outcome"`
-	Loyalty     int       `json:"loyalty"`
-	Safety      int       `json:"safety"`
-	XP          int       `json:"xp"`
-	Categories  []string  `json:"categories"`
+	SituationID uuid.UUID       `json:"situation_id"`
+	Code        string          `json:"code"`
+	Name        string          `json:"name"`
+	Outcome     string          `json:"outcome"`
+	Loyalty     int             `json:"loyalty"`
+	Safety      int             `json:"safety"`
+	XP          int             `json:"xp"`
+	Remarks     json.RawMessage `json:"remarks,omitempty"`
+	ScoreResult json.RawMessage `json:"score_result,omitempty"`
 }
 
 // Finish closes any remaining situations, computes the debrief and awards XP.
@@ -133,13 +151,14 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 	if wasActive {
 		for i := range situations {
 			if situations[i].Status == domain.SituationStatusActive {
-				outcome := "unfinished"
-				situations[i].Status = domain.SituationStatusClosed
-				situations[i].Outcome = &outcome
-				if err := s.store.UpdateSituation(ctx, situations[i]); err != nil {
+				if _, err := s.situations.finishLoaded(ctx, situations[i], time.Now()); err != nil {
 					return nil, err
 				}
 			}
+		}
+		situations, err = s.store.ListSituationsBySession(ctx, sessionID)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -162,42 +181,15 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 		if sit.Outcome != nil {
 			sb.Outcome = *sit.Outcome
 		}
-
-		messages, err := s.store.ListMessagesBySituation(ctx, sit.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range messages {
-			if m.Role == domain.MessageRolePlayer && m.Category != nil {
-				sb.Categories = append(sb.Categories, *m.Category)
-				eff := effectFor(normalizeCategory(*m.Category))
-				if eff.Competency != "" {
-					breakdown.Competencies[eff.Competency] += eff.XP
-				}
-			}
-		}
-
-		if sit.Outcome != nil && *sit.Outcome != "unfinished" && *sit.Outcome != "timeout" {
-			sb.XP = situationXP(sit.Loyalty, sit.Safety)
-		}
+		sb.XP = sit.XP
+		sb.Remarks = sit.Remarks
+		sb.ScoreResult = sit.ScoreResult
 		breakdown.TotalXP += sb.XP
 		breakdown.Situations = append(breakdown.Situations, sb)
 	}
 
 	if wasActive {
-		if breakdown.TotalXP > 0 {
-			if err := s.store.AddTotalXP(ctx, playerID, breakdown.TotalXP); err != nil {
-				return nil, err
-			}
-		}
-		for code, xp := range breakdown.Competencies {
-			if xp > 0 {
-				if err := s.store.AddCompetencyXP(ctx, playerID, code, xp); err != nil {
-					return nil, err
-				}
-			}
-		}
-		if err := s.store.FinishSession(ctx, sessionID, time.Now()); err != nil {
+		if _, err := s.store.FinishSessionAndAwardXP(ctx, sessionID, playerID, breakdown.TotalXP, time.Now()); err != nil {
 			return nil, err
 		}
 	}

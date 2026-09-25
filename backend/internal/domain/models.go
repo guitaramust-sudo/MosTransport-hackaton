@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,15 +47,22 @@ const (
 )
 
 type Situation struct {
-	ID              uuid.UUID      `json:"id"`
-	SessionID       uuid.UUID      `json:"session_id"`
-	Status          string         `json:"status"`
-	PassengerParams map[string]any `json:"passenger_params"`
-	Loyalty         int            `json:"loyalty"`
-	Safety          int            `json:"safety"`
-	TimerDeadline   *time.Time     `json:"timer_deadline"`
-	Outcome         *string        `json:"outcome"`
-	CreatedAt       time.Time      `json:"created_at"`
+	ID              uuid.UUID       `json:"id"`
+	SessionID       uuid.UUID       `json:"session_id"`
+	Status          string          `json:"status"`
+	SituationDefID  *string         `json:"situation_def_id,omitempty"`
+	PassengerID     *string         `json:"passenger_id,omitempty"`
+	PassengerParams map[string]any  `json:"passenger_params"`
+	Escalations     []string        `json:"escalations"`
+	Remarks         json.RawMessage `json:"remarks,omitempty"`
+	ScoreResult     json.RawMessage `json:"score_result,omitempty"`
+	XP              int             `json:"xp"`
+	Loyalty         int             `json:"loyalty"`
+	Safety          int             `json:"safety"`
+	TimerDeadline   *time.Time      `json:"timer_deadline"`
+	Outcome         *string         `json:"outcome"`
+	ClosedAt        *time.Time      `json:"closed_at,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 type Message struct {

@@ -1,0 +1,12 @@
+[
+  {"id":"elderly_anxious","age":"elderly","tone":"anxious","language":"ru","traits":["плохо слышит","переспрашивает"],"prompt_hint":"Пожилой тревожный пассажир, которому нужны спокойные короткие объяснения."},
+  {"id":"elderly_calm","age":"elderly","tone":"calm","language":"ru","traits":["передвигается медленно","благодарен за помощь"],"prompt_hint":"Пожилой спокойный пассажир, который ценит терпение и ясность."},
+  {"id":"young_confused","age":"young","tone":"confused","language":"ru","traits":["впервые едет на поезде","путает вагоны"],"prompt_hint":"Молодой пассажир, который не знает правил поездки и задаёт уточняющие вопросы."},
+  {"id":"young_indifferent","age":"young","tone":"indifferent","language":"ru","traits":["отвлекается на телефон","отвечает коротко"],"prompt_hint":"Молодой пассажир, который слушает вполуха и отвечает односложно."},
+  {"id":"middle_aggressive","age":"middle","tone":"aggressive","language":"ru","traits":["спешит","раздражён задержкой"],"prompt_hint":"Раздражённый пассажир среднего возраста; спорит, но слышит конкретные предложения."},
+  {"id":"middle_anxious","age":"middle","tone":"anxious","language":"ru","traits":["боится опоздать","часто перебивает"],"prompt_hint":"Тревожный пассажир среднего возраста, которому нужны чёткие следующие шаги."},
+  {"id":"middle_calm","age":"middle","tone":"calm","language":"ru","traits":["задаёт точные вопросы","готов сотрудничать"],"prompt_hint":"Спокойный пассажир среднего возраста, который ценит конкретные ответы."},
+  {"id":"child_confused","age":"child","tone":"confused","language":"ru","traits":["едет с сопровождающим","не может описать проблему"],"prompt_hint":"Ребёнок, который волнуется и отвечает простыми фразами; рядом сопровождающий."},
+  {"id":"visitor_english","age":"middle","tone":"confused","language":"en","traits":["не понимает русский язык","показывает билет"],"prompt_hint":"English-speaking visitor who needs simple directions and may ask for repetition."},
+  {"id":"visitor_chinese","age":"young","tone":"anxious","language":"zh","traits":["не понимает русский язык","пользуется переводчиком"],"prompt_hint":"说中文的乘客，因行程问题紧张，倾向于使用翻译软件交流。"}
+]

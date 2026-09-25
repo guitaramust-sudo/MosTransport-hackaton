@@ -1,0 +1,106 @@
+[
+  {
+    "id": "medical_asthma", "type": "medical", "criticality": "critical",
+    "title": "Пассажиру трудно дышать", "opening": "Пассажир тяжело дышит и просит о помощи.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Успокоить пассажира и остаться рядом"},
+      {"id": "B", "desc": "Сообщить, что вызываешь помощь"},
+      {"id": "C", "desc": "Спросить о медиках среди пассажиров"}
+    ], "escalation": {"required": true, "to": ["train_chief", "medic"]}}, "time_limit_sec": 60
+  },
+  {
+    "id": "medical_fainting", "type": "medical", "criticality": "critical",
+    "title": "Пассажир потерял сознание", "opening": "Человек в проходе внезапно упал и не отвечает на обращение.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Проверить реакцию и дыхание пассажира"},
+      {"id": "B", "desc": "Попросить окружающих освободить место"},
+      {"id": "C", "desc": "Сообщить о вызове медицинской помощи"}
+    ], "escalation": {"required": true, "to": ["train_chief", "medic"]}}, "time_limit_sec": 60
+  },
+  {
+    "id": "safety_smoke", "type": "safety", "criticality": "critical",
+    "title": "Запах дыма в вагоне", "opening": "Пассажиры заметили запах дыма возле тамбура.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Уточнить место и источник запаха дыма"},
+      {"id": "B", "desc": "Предупредить пассажиров и отвести их от опасного места"},
+      {"id": "C", "desc": "Сообщить о происшествии начальнику поезда"}
+    ], "escalation": {"required": true, "to": ["train_chief"]}}, "time_limit_sec": 60
+  },
+  {
+    "id": "safety_unattended_bag", "type": "safety", "criticality": "high",
+    "title": "Бесхозная сумка", "opening": "Под сиденьем нашли сумку, владельца рядом нет.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Попросить не трогать сумку"},
+      {"id": "B", "desc": "Уточнить, кому принадлежит сумка"},
+      {"id": "C", "desc": "Сообщить о находке службе безопасности"}
+    ], "escalation": {"required": true, "to": ["ptb"]}}, "time_limit_sec": 120
+  },
+  {
+    "id": "conflict_aggressive", "type": "conflict", "criticality": "high",
+    "title": "Агрессивный пассажир", "opening": "Пассажир кричит на соседей и мешает проходу.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Говорить спокойно и без угроз"},
+      {"id": "B", "desc": "Попросить прекратить мешать другим пассажирам"},
+      {"id": "C", "desc": "Объяснить дальнейшие действия при отказе"}
+    ], "escalation": {"required": false, "to": ["train_chief", "police"]}}, "time_limit_sec": 120
+  },
+  {
+    "id": "conflict_seat", "type": "conflict", "criticality": "medium",
+    "title": "Спор за место", "opening": "Два пассажира показывают билеты на одно место и спорят.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Выслушать обоих пассажиров"},
+      {"id": "B", "desc": "Сверить данные билетов и места"},
+      {"id": "C", "desc": "Предложить решение и объяснить его"}
+    ], "escalation": {"required": false, "to": ["train_chief"]}}, "time_limit_sec": 300
+  },
+  {
+    "id": "service_heavy_luggage", "type": "service", "criticality": "low",
+    "title": "Тяжёлый багаж", "opening": "Пассажир не может поднять чемодан на полку.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Предложить помощь с багажом"},
+      {"id": "B", "desc": "Уточнить безопасное место для чемодана"}
+    ], "escalation": {"required": false, "to": []}}, "time_limit_sec": 600
+  },
+  {
+    "id": "service_lost_phone", "type": "service", "criticality": "medium",
+    "title": "Потерян телефон", "opening": "Пассажир не может найти телефон и переживает из-за билета.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Успокоить пассажира"},
+      {"id": "B", "desc": "Помочь проверить последние места, где был телефон"},
+      {"id": "C", "desc": "Объяснить порядок обращения по поводу пропажи"}
+    ], "escalation": {"required": false, "to": ["train_chief"]}}, "time_limit_sec": 300
+  },
+  {
+    "id": "service_missing_ticket", "type": "service", "criticality": "medium",
+    "title": "Не найден билет", "opening": "Пассажир уверен, что купил билет, но не может его показать.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Спокойно уточнить данные поездки"},
+      {"id": "B", "desc": "Предложить проверить электронный билет"},
+      {"id": "C", "desc": "Объяснить дальнейший порядок проверки"}
+    ], "escalation": {"required": false, "to": ["train_chief"]}}, "time_limit_sec": 300
+  },
+  {
+    "id": "service_loud_music", "type": "service", "criticality": "low",
+    "title": "Громкая музыка", "opening": "Музыка пассажира слышна соседям, которые жалуются на шум.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Вежливо попросить сделать музыку тише"},
+      {"id": "B", "desc": "Объяснить, что шум мешает соседям"}
+    ], "escalation": {"required": false, "to": []}}, "time_limit_sec": 600
+  },
+  {
+    "id": "informational_next_stop", "type": "informational", "criticality": "low",
+    "title": "Вопрос о следующей остановке", "opening": "Пассажир просит уточнить следующую станцию и время прибытия.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Назвать следующую станцию после проверки расписания"},
+      {"id": "B", "desc": "Сообщить актуальное время прибытия"}
+    ], "escalation": {"required": false, "to": []}}, "time_limit_sec": 600
+  },
+  {
+    "id": "informational_transfer", "type": "informational", "criticality": "low",
+    "title": "Вопрос о пересадке", "opening": "Пассажир спрашивает, где пересесть на другой поезд.",
+    "correct_completion": {"must_convey": [
+      {"id": "A", "desc": "Уточнить нужное направление пересадки"},
+      {"id": "B", "desc": "Объяснить, где получить актуальную информацию о платформе"}
+    ], "escalation": {"required": false, "to": []}}, "time_limit_sec": 600
+  }
+]

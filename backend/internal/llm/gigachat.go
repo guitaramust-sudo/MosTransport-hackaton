@@ -119,16 +119,26 @@ type chatResponse struct {
 }
 
 func (c *GigaChatClient) Chat(ctx context.Context, messages []Message) (string, error) {
+	return c.complete(ctx, chatRequest{Model: c.model, Messages: messages, Temperature: 0.7, MaxTokens: c.maxToks})
+}
+
+func (c *GigaChatClient) ScoreDialogue(ctx context.Context, input ScoringInput) (ScoreResult, error) {
+	raw, err := c.complete(ctx, chatRequest{
+		Model:       c.model,
+		Messages:    []Message{{Role: "system", Content: ScoringPrompt(input)}},
+		Temperature: 0,
+		MaxTokens:   256,
+	})
+	if err != nil {
+		return ScoreResult{}, err
+	}
+	return ParseScoreResult(raw)
+}
+
+func (c *GigaChatClient) complete(ctx context.Context, payload chatRequest) (string, error) {
 	token, err := c.accessToken(ctx)
 	if err != nil {
 		return "", err
-	}
-
-	payload := chatRequest{
-		Model:       c.model,
-		Messages:    messages,
-		Temperature: 0.7,
-		MaxTokens:   c.maxToks,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
