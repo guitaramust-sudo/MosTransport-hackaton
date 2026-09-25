@@ -1,0 +1,7 @@
+.git
+.idea
+*.exe
+*.test
+.env
+README.md
+docs

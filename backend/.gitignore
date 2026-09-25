@@ -1,0 +1,13 @@
+# Go
+server
+/server
+*.exe
+*.test
+*.out
+
+# Env
+.env
+
+# IDE
+.idea/
+.vscode/

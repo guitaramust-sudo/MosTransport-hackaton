@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vsm
+      POSTGRES_PASSWORD: vsm
+      POSTGRES_DB: vsm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vsm -d vsm"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://vsm:vsm@postgres:5432/vsm?sslmode=disable
+      SERVER_PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-24h}
+      LLM_MODE: ${LLM_MODE:-mock}
+      GIGACHAT_CLIENT_ID: ${GIGACHAT_CLIENT_ID:-}
+      GIGACHAT_CLIENT_SECRET: ${GIGACHAT_CLIENT_SECRET:-}
+      GIGACHAT_AUTH_URL: ${GIGACHAT_AUTH_URL:-https://ngw.devices.sberbank.ru:9443/api/v2/oauth}
+      GIGACHAT_API_URL: ${GIGACHAT_API_URL:-https://gigachat.devices.sberbank.ru/api/v1}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
+      GIGACHAT_INSECURE: ${GIGACHAT_INSECURE:-false}
+      SITUATIONS_PER_SESSION: ${SITUATIONS_PER_SESSION:-4}
+      SITUATION_TIMEOUT: ${SITUATION_TIMEOUT:-120s}
+      MAX_TURNS_PER_SITUATION: ${MAX_TURNS_PER_SITUATION:-3}
+    ports:
+      - "8088:8080"
+
+volumes:
+  pgdata:
