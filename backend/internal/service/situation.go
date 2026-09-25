@@ -101,28 +101,37 @@ func (s *SituationService) SendMessage(ctx context.Context, playerID, situationI
 			Status: domain.SituationStatusClosed, Outcome: &result.Outcome, TimerDeadline: sit.TimerDeadline,
 			Closed: true, TurnCount: turnCount}, nil
 	}
-	if _, err := s.store.CreateMessage(ctx, situationID, domain.MessageRolePlayer, text, nil); err != nil {
-		return nil, err
-	}
-	for _, target := range escalationTargets(text) {
-		if _, err := s.store.AddEscalation(ctx, situationID, target); err != nil {
-			return nil, err
-		}
-	}
 	history, err := s.buildHistory(ctx, sit)
 	if err != nil {
 		return nil, err
 	}
+	history = append(history, llm.Message{Role: "user", Content: text})
 	reply, err := s.llm.Chat(ctx, history)
 	if err != nil {
 		slog.Error("passenger chat failed", "situation_id", situationID, "error", err)
 		reply = "Понимаю… И что вы предлагаете сделать?"
 	}
-	if _, err := s.store.CreateMessage(ctx, situationID, domain.MessageRolePassenger, reply, nil); err != nil {
-		return nil, err
+	turnCount, err := s.store.AppendTurn(ctx, situationID, playerID, text, reply, escalationTargets(text))
+	if errors.Is(err, repo.ErrDeadlineExceeded) {
+		result, closeErr := s.finishLoaded(ctx, sit, time.Now())
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		turnCount, _ := s.store.CountPlayerMessages(ctx, situationID)
+		return &TurnResult{SituationID: situationID, Loyalty: result.Loyalty, Safety: result.Safety,
+			Status: domain.SituationStatusClosed, Outcome: &result.Outcome, TimerDeadline: sit.TimerDeadline,
+			Closed: true, TurnCount: turnCount}, nil
 	}
-
-	turnCount, err := s.store.CountPlayerMessages(ctx, situationID)
+	if errors.Is(err, repo.ErrConflict) {
+		currentSession, getErr := s.store.GetSession(ctx, sit.SessionID)
+		if getErr == nil && currentSession.Status != domain.SessionStatusActive {
+			return nil, ErrSessionFinished
+		}
+		return nil, ErrSituationClosed
+	}
+	if errors.Is(err, repo.ErrNotFound) {
+		return nil, ErrSituationNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +177,8 @@ func (s *SituationService) buildHistory(ctx context.Context, sit domain.Situatio
 	}
 
 	// Cap the tail to save tokens (system prompt always stays).
-	if len(messages) > maxHistoryMessages {
-		messages = messages[len(messages)-maxHistoryMessages:]
+	if len(messages) >= maxHistoryMessages {
+		messages = messages[len(messages)-(maxHistoryMessages-1):]
 	}
 	for _, m := range messages {
 		role := m.Role

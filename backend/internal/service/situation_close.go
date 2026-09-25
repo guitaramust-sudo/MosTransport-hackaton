@@ -70,17 +70,23 @@ func (s *SituationService) Escalate(ctx context.Context, playerID, situationID u
 		}
 		return nil, ErrSituationClosed
 	}
-	actual, err := s.store.AddEscalation(ctx, situationID, target)
+	actual, err := s.store.RecordEscalation(ctx, situationID, playerID, target)
 	if errors.Is(err, repo.ErrNotFound) {
+		return nil, ErrSituationNotFound
+	}
+	if errors.Is(err, repo.ErrDeadlineExceeded) {
+		if _, closeErr := s.finishLoaded(ctx, sit, time.Now()); closeErr != nil {
+			return nil, closeErr
+		}
+		return nil, ErrSituationClosed
+	}
+	if errors.Is(err, repo.ErrConflict) {
 		return nil, ErrSituationClosed
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !contains(sit.Escalations, target) {
-		err = s.store.CreateEscalationMessage(ctx, situationID, target)
-	}
-	return actual, err
+	return actual, nil
 }
 
 func (s *SituationService) CloseExpired(ctx context.Context) error {
@@ -101,70 +107,61 @@ func (s *SituationService) CloseExpired(ctx context.Context) error {
 }
 
 func (s *SituationService) finishLoaded(ctx context.Context, sit domain.Situation, now time.Time) (*ScoreSummary, error) {
-	latest, err := s.store.GetSituation(ctx, sit.ID)
-	if err != nil {
-		return nil, err
-	}
-	if latest.Status != domain.SituationStatusActive {
-		var previous ScoreSummary
-		if json.Unmarshal(latest.ScoreResult, &previous) != nil {
-			return nil, ErrSituationClosed
+	var summary *ScoreSummary
+	err := s.store.WithSituationLock(ctx, sit.ID, func(locked repo.LockedSituation) error {
+		sit = locked.Situation()
+		if sit.Status != domain.SituationStatusActive {
+			var previous ScoreSummary
+			if len(sit.ScoreResult) == 0 || json.Unmarshal(sit.ScoreResult, &previous) != nil {
+				return ErrSituationClosed
+			}
+			summary = &previous
+			return nil
 		}
-		return &previous, nil
-	}
-	sit = latest
-	scenario, passenger, err := s.definitions(sit)
-	if err != nil {
-		return nil, err
-	}
-	messages, err := s.store.ListMessagesBySituation(ctx, sit.ID)
-	if err != nil {
-		return nil, err
-	}
-	history := make([]llm.Message, 0, len(messages))
-	for _, m := range messages {
-		switch m.Role {
-		case domain.MessageRolePlayer:
-			history = append(history, llm.Message{Role: "user", Content: m.Content})
-		case domain.MessageRolePassenger:
-			history = append(history, llm.Message{Role: "assistant", Content: m.Content})
-		}
-	}
-	input := llm.ScoringInput{Scenario: scenario, Passenger: passenger, History: history,
-		Escalations: sit.Escalations, Elapsed: now.Sub(sit.CreatedAt)}
-	observed, err := s.llm.ScoreDialogue(ctx, input)
-	if err != nil {
-		slog.Error("dialogue scoring failed; using missed-point fallback", "situation_id", sit.ID, "error", err)
-		observed = llm.ScoreResult{Tone: "neutral", Reasoning: "scoring fallback"}
-	}
-	timedOut := sit.TimerDeadline != nil && !now.Before(*sit.TimerDeadline)
-	result := EvaluateScore(scenario, observed, sit.Escalations, input.Elapsed, timedOut)
-	remarksJSON, err := json.Marshal(result.Remarks)
-	if err != nil {
-		return nil, err
-	}
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return nil, err
-	}
-	sit.Outcome, sit.Loyalty, sit.Safety, sit.XP = &result.Outcome, result.Loyalty, result.Safety, result.XP
-	sit.Remarks, sit.ScoreResult, sit.ClosedAt = remarksJSON, resultJSON, &now
-	closed, err := s.store.CloseSituation(ctx, sit)
-	if err != nil {
-		return nil, err
-	}
-	if !closed {
-		current, err := s.store.GetSituation(ctx, sit.ID)
+		scenario, passenger, err := s.definitions(sit)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		var previous ScoreSummary
-		if len(current.ScoreResult) == 0 || json.Unmarshal(current.ScoreResult, &previous) != nil {
-			return nil, ErrSituationClosed
+		messages, err := locked.ListMessages(ctx)
+		if err != nil {
+			return err
 		}
-		return &previous, nil
-	}
-	return &result, nil
+		history := make([]llm.Message, 0, len(messages))
+		for _, m := range messages {
+			switch m.Role {
+			case domain.MessageRolePlayer:
+				history = append(history, llm.Message{Role: "user", Content: m.Content})
+			case domain.MessageRolePassenger:
+				history = append(history, llm.Message{Role: "assistant", Content: m.Content})
+			}
+		}
+		now = time.Now()
+		input := llm.ScoringInput{Scenario: scenario, Passenger: passenger, History: history,
+			Escalations: sit.Escalations, Elapsed: now.Sub(sit.CreatedAt)}
+		observed, err := s.llm.ScoreDialogue(ctx, input)
+		if err != nil {
+			slog.Error("dialogue scoring failed; using missed-point fallback", "situation_id", sit.ID, "error", err)
+			observed = llm.ScoreResult{Tone: "neutral", Reasoning: "scoring fallback"}
+		}
+		timedOut := sit.TimerDeadline != nil && !now.Before(*sit.TimerDeadline)
+		result := EvaluateScore(scenario, observed, sit.Escalations, input.Elapsed, timedOut)
+		remarksJSON, err := json.Marshal(result.Remarks)
+		if err != nil {
+			return err
+		}
+		resultJSON, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		sit.Outcome, sit.Loyalty, sit.Safety, sit.XP = &result.Outcome, result.Loyalty, result.Safety, result.XP
+		sit.Remarks, sit.ScoreResult, sit.ClosedAt = remarksJSON, resultJSON, &now
+		if err := locked.Close(ctx, sit); err != nil {
+			return err
+		}
+		summary = &result
+		return nil
+	})
+	return summary, err
 }
 
 func (s *SituationService) definitions(sit domain.Situation) (content.Scenario, content.Passenger, error) {

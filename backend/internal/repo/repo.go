@@ -12,6 +12,16 @@ import (
 
 // ErrNotFound is the sentinel returned when a record does not exist.
 var ErrNotFound = errors.New("not found")
+var ErrConflict = errors.New("state conflict")
+var ErrDeadlineExceeded = errors.New("situation deadline exceeded")
+
+// LockedSituation is a transaction-scoped view used while closing a situation.
+// The row lock freezes the dialog and escalations until scoring is saved.
+type LockedSituation interface {
+	Situation() domain.Situation
+	ListMessages(ctx context.Context) ([]domain.Message, error)
+	Close(ctx context.Context, result domain.Situation) error
+}
 
 // Store is the data-access boundary consumed by the service layer.
 // The postgres package implements it; tests may substitute a fake.
@@ -28,6 +38,7 @@ type Store interface {
 
 	// Sessions
 	CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error)
+	CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, situations []domain.Situation) (domain.Session, []domain.Situation, error)
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
 	FinishSession(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
 	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, finishedAt time.Time) (bool, error)
@@ -43,11 +54,14 @@ type Store interface {
 	ListSituationsBySession(ctx context.Context, sessionID uuid.UUID) ([]domain.Situation, error)
 	UpdateSituation(ctx context.Context, s domain.Situation) error
 	CloseSituation(ctx context.Context, s domain.Situation) (bool, error)
+	WithSituationLock(ctx context.Context, id uuid.UUID, fn func(LockedSituation) error) error
 	AddEscalation(ctx context.Context, situationID uuid.UUID, target string) ([]string, error)
+	RecordEscalation(ctx context.Context, situationID, playerID uuid.UUID, target string) ([]string, error)
 	ListExpiredSituationIDs(ctx context.Context, now time.Time) ([]uuid.UUID, error)
 
 	// Messages
 	CreateMessage(ctx context.Context, situationID uuid.UUID, role, content string, category *string) (domain.Message, error)
+	AppendTurn(ctx context.Context, situationID, playerID uuid.UUID, text, reply string, targets []string) (int, error)
 	CreateEscalationMessage(ctx context.Context, situationID uuid.UUID, target string) error
 	ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error)
 	CountPlayerMessages(ctx context.Context, situationID uuid.UUID) (int, error)

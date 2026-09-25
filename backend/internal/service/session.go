@@ -32,13 +32,8 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 	if err := s.catalog.Validate(); err != nil {
 		return nil, nil, err
 	}
-	sess, err := s.store.CreateSession(ctx, playerID)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	selected := pickScenarios(s.catalog.Scenarios, s.situationsNum)
-	situations := make([]domain.Situation, 0, len(selected))
+	drafts := make([]domain.Situation, 0, len(selected))
 	for _, scenario := range selected {
 		passenger := s.catalog.Passengers[rand.Intn(len(s.catalog.Passengers))]
 		deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
@@ -56,8 +51,7 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 			"traits":           passenger.Traits,
 			"traits_text":      strings.Join(passenger.Traits, ", "),
 		}
-		sit, err := s.store.CreateSituation(ctx, domain.Situation{
-			SessionID:       sess.ID,
+		drafts = append(drafts, domain.Situation{
 			Status:          domain.SituationStatusActive,
 			SituationDefID:  &scenarioID,
 			PassengerID:     &passengerID,
@@ -66,15 +60,11 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 			Safety:          50,
 			TimerDeadline:   &deadline,
 		})
-		if err != nil {
-			return nil, nil, err
-		}
-		if _, err := s.store.CreateMessage(ctx, sit.ID, domain.MessageRoleSystem, scenario.Opening, nil); err != nil {
-			return nil, nil, err
-		}
-		situations = append(situations, sit)
 	}
-
+	sess, situations, err := s.store.CreateSessionWithSituations(ctx, playerID, drafts)
+	if err != nil {
+		return nil, nil, err
+	}
 	return &sess, situations, nil
 }
 
