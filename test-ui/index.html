@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VSM-400 Test UI</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  body { background: #f5f6f8; }
+  .chat-log { height: 340px; overflow-y: auto; background: #fff; border: 1px solid #dee2e6; border-radius: .375rem; padding: .75rem; }
+  .bubble { max-width: 75%; padding: .5rem .75rem; border-radius: 1rem; margin-bottom: .5rem; word-wrap: break-word; white-space: pre-wrap; }
+  .bubble.passenger { background: #e9ecef; margin-right: auto; border-bottom-left-radius: .2rem; }
+  .bubble.player { background: #cfe2ff; margin-left: auto; border-bottom-right-radius: .2rem; }
+  .bubble.system { background: #fff3cd; margin: 0 auto; text-align: center; font-size: .85em; }
+  .bubble .cat { display:block; font-size:.75em; color:#6c757d; margin-top:.25rem; }
+  .scale-label { font-size: .8em; font-weight: 600; }
+  .situation-item { cursor: pointer; }
+  .situation-item.active { border-left: 4px solid #0d6efd; }
+  .situation-item.closed { opacity: .6; }
+  #timer { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark mb-3">
+  <div class="container-fluid">
+    <span class="navbar-brand">🚆 VSM-400 Test UI</span>
+    <span id="conn-badge" class="badge text-bg-secondary">не подключен</span>
+  </div>
+</nav>
+
+<div class="container-fluid">
+
+  <!-- ============ AUTH / SETUP ============ -->
+  <div id="setup-view" class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-header bg-white">
+          <label class="form-label small text-muted mb-0">API base URL</label>
+          <input id="base-url" class="form-control form-control-sm" placeholder="http://localhost:8088">
+        </div>
+        <div class="card-body">
+          <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-login" type="button">Вход</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-register" type="button">Регистрация</button></li>
+          </ul>
+          <div class="tab-content pt-3">
+            <div class="tab-pane fade show active" id="tab-login">
+              <div class="mb-2"><input id="login-email" class="form-control" placeholder="email"></div>
+              <div class="mb-3"><input id="login-password" type="password" class="form-control" placeholder="password"></div>
+              <button class="btn btn-primary w-100" onclick="login()">Войти</button>
+            </div>
+            <div class="tab-pane fade" id="tab-register">
+              <div class="mb-2"><input id="reg-email" class="form-control" placeholder="email"></div>
+              <div class="mb-2"><input id="reg-username" class="form-control" placeholder="username"></div>
+              <div class="mb-3"><input id="reg-password" type="password" class="form-control" placeholder="password"></div>
+              <button class="btn btn-success w-100" onclick="register()">Зарегистрироваться</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="alert alert-info mt-3 small">
+        Бэкенд должен быть запущен (<code>docker compose up</code> или <code>go run ./cmd/server</code>).
+        CORS уже разрешён на бэке — можно открывать файл напрямую.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app-view" class="row g-3 d-none">
+
+    <!-- Left column -->
+    <div class="col-md-4 col-lg-3">
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <h6 class="mb-1" id="player-name">—</h6>
+          <div class="text-muted small mb-2" id="player-email">—</div>
+          <div><span class="badge text-bg-primary" id="player-xp">0 XP</span></div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-3">
+        <div class="card-body d-grid gap-2">
+          <button class="btn btn-primary" onclick="startSession()">▶ Начать смену</button>
+          <button class="btn btn-warning" onclick="finishSession()">⏹ Завершить смену</button>
+          <button class="btn btn-outline-secondary" onclick="loadProfile()">Профиль</button>
+          <button class="btn btn-outline-secondary" onclick="loadLeaderboard()">Лидерборд</button>
+          <button class="btn btn-outline-danger" onclick="logout()">Выйти</button>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header bg-white">Ситуации <span id="situation-count" class="badge text-bg-secondary"></span></div>
+        <ul class="list-group list-group-flush" id="situation-list"></ul>
+      </div>
+    </div>
+
+    <!-- Right column -->
+    <div class="col-md-8 col-lg-9">
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <div>
+              <h5 class="mb-0" id="sit-title">Выберите ситуацию</h5>
+              <div class="text-muted small" id="sit-scenario"></div>
+            </div>
+            <div class="text-end">
+              <div class="small text-muted">таймер</div>
+              <div class="h4" id="timer">—</div>
+            </div>
+          </div>
+          <div class="row mt-3">
+            <div class="col-6">
+              <div class="d-flex justify-content-between"><span class="scale-label">Лояльность</span><span id="loyalty-val" class="small">—</span></div>
+              <div class="progress" style="height:14px"><div id="loyalty-bar" class="progress-bar bg-success" style="width:0%"></div></div>
+            </div>
+            <div class="col-6">
+              <div class="d-flex justify-content-between"><span class="scale-label">Безопасность</span><span id="safety-val" class="small">—</span></div>
+              <div class="progress" style="height:14px"><div id="safety-bar" class="progress-bar bg-danger" style="width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="chat-log mb-3" id="chat-log"></div>
+          <div id="sit-closed-banner" class="alert alert-warning d-none"></div>
+          <div class="input-group">
+            <input id="msg-input" class="form-control" placeholder="Ответ проводника…" onkeydown="if(event.key==='Enter')sendMessage()">
+            <button class="btn btn-primary" onclick="sendMessage()">Отправить</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mt-3 d-none" id="breakdown-card">
+        <div class="card-header bg-white">Разбор смены</div>
+        <div class="card-body" id="breakdown-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Log toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const state = {
+  baseUrl: localStorage.getItem('vsm_base') || 'http://localhost:8080',
+  token: localStorage.getItem('vsm_token') || null,
+  player: null,
+  sessionId: null,
+  situations: [],
+  currentSit: null,
+  timerHandle: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toast(msg, type='secondary') {
+  const el = document.createElement('div');
+  el.className = `toast align-items-center text-bg-${type} border-0`;
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${esc(msg)}</div>
+    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  $('toasts').appendChild(el);
+  new bootstrap.Toast(el, { delay: 4000 }).show();
+}
+
+async function api(path, { method='GET', body=null, auth=true } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth && state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  const res = await fetch(state.baseUrl + path, {
+    method, headers, body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  const text = await res.text();
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) {
+    const msg = (data && data.error) ? data.error : (`HTTP ${res.status}`);
+    throw new Error(msg);
+  }
+  return data;
+}
+
+// ---------- auth ----------
+async function login() {
+  try {
+    const r = await api('/auth/login', { method:'POST', auth:false, body: { email: $('login-email').value, password: $('login-password').value } });
+    applyAuth(r);
+    toast('Успешный вход', 'success');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+async function register() {
+  try {
+    const r = await api('/auth/register', { method:'POST', auth:false, body: { email: $('reg-email').value, username: $('reg-username').value, password: $('reg-password').value } });
+    applyAuth(r);
+    toast('Аккаунт создан', 'success');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+function applyAuth(r) {
+  state.token = r.tokens.access_token;
+  state.player = r.player;
+  localStorage.setItem('vsm_token', state.token);
+  localStorage.setItem('vsm_base', state.baseUrl);
+  showApp();
+}
+function logout() {
+  state.token = null; state.player = null; state.sessionId = null; state.situations = []; state.currentSit = null;
+  localStorage.removeItem('vsm_token');
+  stopTimer();
+  $('app-view').classList.add('d-none');
+  $('setup-view').classList.remove('d-none');
+  $('conn-badge').textContent = 'не подключен';
+  $('conn-badge').className = 'badge text-bg-secondary';
+}
+function showApp() {
+  $('setup-view').classList.add('d-none');
+  $('app-view').classList.remove('d-none');
+  $('player-name').textContent = state.player.username;
+  $('player-email').textContent = state.player.email;
+  $('player-xp').textContent = state.player.total_xp + ' XP';
+  $('conn-badge').textContent = 'подключен: ' + state.player.username;
+  $('conn-badge').className = 'badge text-bg-success';
+  loadProfile();
+}
+
+// ---------- profile / leaderboard ----------
+async function loadProfile() {
+  try {
+    const p = await api('/api/profile');
+    state.player = p.player;
+    $('player-name').textContent = p.player.username;
+    $('player-email').textContent = p.player.email;
+    $('player-xp').textContent = p.player.total_xp + ' XP';
+    let comps = (p.competencies || []).map(c => `${c.competency_id}:${c.xp}`).join(' ');
+    toast('Профиль загружен' + (comps ? ` · компетенции [${comps}]` : ''), 'info');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+async function loadLeaderboard() {
+  try {
+    const r = await api('/api/leaderboard');
+    const rows = r.leaderboard.map(e => `<tr><td>${e.rank}</td><td>${esc(e.username)}</td><td>${e.total_xp}</td></tr>`).join('');
+    const html = `<div class="modal fade" id="lbModal"><div class="modal-dialog"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Лидерборд</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><table class="table table-sm"><thead><tr><th>#</th><th>Игрок</th><th>XP</th></tr></thead><tbody>${rows || '<tr><td colspan=3>пусто</td></tr>'}</tbody></table></div></div></div></div>`;
+    const holder = document.createElement('div'); holder.innerHTML = html;
+    document.body.appendChild(holder.firstChild);
+    new bootstrap.Modal(document.getElementById('lbModal')).show();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+// ---------- session ----------
+async function startSession() {
+  try {
+    const r = await api('/api/session/start', { method:'POST' });
+    state.sessionId = r.session.id;
+    state.situations = r.situations;
+    state.currentSit = null;
+    $('breakdown-card').classList.add('d-none');
+    renderSituations();
+    toast(`Смена начата: ${r.situations.length} ситуаций`, 'success');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+function renderSituations() {
+  $('situation-count').textContent = state.situations.length;
+  const ul = $('situation-list');
+  ul.innerHTML = '';
+  state.situations.forEach(s => {
+    const li = document.createElement('li');
+    li.className = 'list-group-item situation-item ' + (s.status === 'closed' ? 'closed' : '') +
+      (state.currentSit && state.currentSit.id === s.id ? ' active' : '');
+    const outcome = s.outcome ? ` <span class="badge text-bg-secondary">${esc(s.outcome)}</span>` : '';
+    li.innerHTML = `<div class="fw-semibold">${esc(s.name || s.code || 'Ситуация')}</div>
+      <div class="small text-muted">лояльность ${s.loyalty} · безопасность ${s.safety}${outcome}</div>`;
+    li.onclick = () => openSituation(s.id);
+    ul.appendChild(li);
+  });
+}
+
+async function openSituation(id) {
+  try {
+    const r = await api('/api/situation/' + id);
+    state.currentSit = r.situation;
+    renderSituations();
+    renderSituation(r.situation, r.messages);
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+function renderSituation(sit, messages) {
+  $('sit-title').textContent = (sit.name || sit.code || 'Ситуация') + ' — ' + sit.id.slice(0,8);
+  $('sit-scenario').textContent = sit.scenario || '';
+  setScale(sit.loyalty, sit.safety);
+
+  const log = $('chat-log');
+  log.innerHTML = '';
+  (messages || []).forEach(m => {
+    const role = m.role === 'player' ? 'player' : (m.role === 'passenger' ? 'passenger' : 'system');
+    const div = document.createElement('div');
+    div.className = 'bubble ' + role;
+    div.innerHTML = esc(m.content) + (m.category ? `<span class="cat">категория: ${esc(m.category)}</span>` : '');
+    log.appendChild(div);
+  });
+  log.scrollTop = log.scrollHeight;
+
+  const closed = sit.status === 'closed';
+  $('msg-input').disabled = closed;
+  const banner = $('sit-closed-banner');
+  if (closed) {
+    banner.classList.remove('d-none');
+    banner.textContent = 'Ситуация закрыта. Исход: ' + (sit.outcome || '—');
+  } else {
+    banner.classList.add('d-none');
+  }
+
+  startTimer(sit.timer_deadline);
+}
+
+function setScale(loyalty, safety) {
+  $('loyalty-val').textContent = loyalty;
+  $('safety-val').textContent = safety;
+  $('loyalty-bar').style.width = loyalty + '%';
+  $('safety-bar').style.width = safety + '%';
+}
+
+function startTimer(deadline) {
+  stopTimer();
+  if (!deadline) { $('timer').textContent = '—'; return; }
+  const tick = () => {
+    const ms = new Date(deadline).getTime() - Date.now();
+    if (ms <= 0) { $('timer').textContent = 'истекло'; stopTimer(); return; }
+    const s = Math.floor(ms/1000);
+    $('timer').textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+  };
+  tick();
+  state.timerHandle = setInterval(tick, 1000);
+}
+function stopTimer() { if (state.timerHandle) { clearInterval(state.timerHandle); state.timerHandle = null; } }
+
+async function sendMessage() {
+  const text = $('msg-input').value.trim();
+  if (!text || !state.currentSit) return;
+  $('msg-input').value = '';
+  try {
+    const r = await api(`/api/situation/${state.currentSit.id}/message`, { method:'POST', body:{ text } });
+    // update situation in list
+    const idx = state.situations.findIndex(s => s.id === state.currentSit.id);
+    if (idx >= 0) {
+      state.situations[idx].loyalty = r.loyalty;
+      state.situations[idx].safety = r.safety;
+      state.situations[idx].status = r.status;
+      state.situations[idx].outcome = r.outcome;
+    }
+    state.currentSit.loyalty = r.loyalty;
+    state.currentSit.safety = r.safety;
+    state.currentSit.status = r.status;
+    state.currentSit.outcome = r.outcome;
+    renderSituations();
+
+    // append player + passenger bubbles
+    const log = $('chat-log');
+    const pb = document.createElement('div');
+    pb.className = 'bubble player';
+    pb.innerHTML = esc(text) + `<span class="cat">категория: ${esc(r.category || '—')}</span>`;
+    log.appendChild(pb);
+    const rb = document.createElement('div');
+    rb.className = 'bubble passenger';
+    rb.innerHTML = esc(r.reply);
+    log.appendChild(rb);
+    log.scrollTop = log.scrollHeight;
+
+    setScale(r.loyalty, r.safety);
+    if (r.closed) {
+      $('msg-input').disabled = true;
+      const banner = $('sit-closed-banner');
+      banner.classList.remove('d-none');
+      banner.textContent = 'Ситуация закрыта. Исход: ' + (r.outcome || '—');
+    }
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function finishSession() {
+  if (!state.sessionId) { toast('Сначала начните смену', 'warning'); return; }
+  try {
+    const b = await api(`/api/session/${state.sessionId}/finish`, { method:'POST' });
+    $('breakdown-card').classList.remove('d-none');
+    const comps = Object.entries(b.competencies_xp || {}).map(([k,v]) => `${esc(k)}: +${v}`).join(', ') || '—';
+    const rows = b.situations.map(s =>
+      `<tr><td>${esc(s.name||s.code)}</td><td>${esc(s.outcome)}</td><td>${s.loyalty}</td><td>${s.safety}</td><td>+${s.xp}</td></tr>`).join('');
+    $('breakdown-body').innerHTML =
+      `<h6>Всего опыта: <span class="badge text-bg-primary">+${b.total_xp}</span></h6>
+       <p class="small text-muted">Компетенции: ${comps}</p>
+       <table class="table table-sm"><thead><tr><th>Ситуация</th><th>Исход</th><th>Лояльн.</th><th>Безоп.</th><th>XP</th></tr></thead><tbody>${rows}</tbody></table>`;
+    toast(`Смена завершена, +${b.total_xp} XP`, 'success');
+    loadProfile();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+// init
+$('base-url').value = state.baseUrl;
+$('base-url').addEventListener('change', () => { state.baseUrl = $('base-url').value.trim().replace(/\/+$/,''); localStorage.setItem('vsm_base', state.baseUrl); });
+
+if (state.token) {
+  api('/api/profile').then(p => { state.player = p.player; showApp(); }).catch(() => logout());
+}
+</script>
+</body>
+</html>
