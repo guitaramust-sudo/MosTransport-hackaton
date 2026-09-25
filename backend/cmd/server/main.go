@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -104,6 +105,7 @@ func run() error {
 
 func routes(h *handler.Handlers, auth *service.AuthService) http.Handler {
 	r := chi.NewRouter()
+	r.Use(localWebCORS)
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
@@ -124,4 +126,31 @@ func routes(h *handler.Handlers, auth *service.AuthService) http.Handler {
 		r.Post("/situation/{id}/finish", h.FinishSituation)
 	})
 	return r
+}
+
+// Expo web uses a separate localhost port during local development. Explicit
+// CORS_ORIGINS can override this list for other deployments.
+func localWebCORS(next http.Handler) http.Handler {
+	allowed := os.Getenv("CORS_ORIGINS")
+	if allowed == "" {
+		allowed = "http://localhost:8081,http://localhost:19006,http://127.0.0.1:8081,http://127.0.0.1:19006"
+	}
+	origins := map[string]bool{}
+	for _, origin := range strings.Split(allowed, ",") {
+		origins[strings.TrimSpace(origin)] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

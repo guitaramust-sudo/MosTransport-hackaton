@@ -54,6 +54,7 @@ go run ./cmd/server
 | `GIGACHAT_MODEL` | `GigaChat-2` | Модель |
 | `GIGACHAT_INSECURE` | `false` | Пропуск проверки TLS (только для локальной разработки) |
 | `SITUATIONS_PER_SESSION` | `4` | Число ситуаций в смене |
+| `CORS_ORIGINS` | localhost:8081 и localhost:19006 (HTTP) | Разрешённые источники Expo web, через запятую |
 
 ## API
 

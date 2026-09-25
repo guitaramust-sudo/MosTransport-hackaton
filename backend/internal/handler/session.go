@@ -21,6 +21,7 @@ type situationDTO struct {
 	PassengerID    *string         `json:"passenger_id,omitempty"`
 	Code           string          `json:"code"`
 	Name           string          `json:"name"`
+	Language       string          `json:"language,omitempty"`
 	Scenario       string          `json:"scenario"`
 	Opening        string          `json:"opening,omitempty"`
 	Loyalty        int             `json:"loyalty"`
@@ -54,6 +55,7 @@ func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
 	if p := s.PassengerParams; p != nil {
 		d.Code, _ = p["code"].(string)
 		d.Name, _ = p["name"].(string)
+		d.Language, _ = p["language"].(string)
 		d.Scenario, _ = p["scenario"].(string)
 		if includeOpening {
 			d.Opening, _ = p["opening"].(string)
