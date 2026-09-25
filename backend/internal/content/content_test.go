@@ -11,11 +11,11 @@ func TestEmbeddedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(c.Scenarios); got != 12 {
-		t.Fatalf("scenario count = %d, want 12", got)
+	if got := len(c.Scenarios); got != 50 {
+		t.Fatalf("scenario count = %d, want 50", got)
 	}
-	if got := len(c.Passengers); got != 10 {
-		t.Fatalf("passenger count = %d, want 10", got)
+	if got := len(c.Passengers); got != 50 {
+		t.Fatalf("passenger count = %d, want 50", got)
 	}
 }
 

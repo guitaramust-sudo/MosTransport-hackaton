@@ -20,11 +20,31 @@ func (m *MockLLM) Chat(ctx context.Context, messages []Message) (string, error) 
 	}
 
 	last := ""
+	language := "ru"
+	for _, message := range messages {
+		if message.Role != "system" {
+			continue
+		}
+		for _, candidate := range []string{"en", "zh", "de"} {
+			if strings.Contains(message.Content, "Язык: "+candidate+".") {
+				language = candidate
+			}
+		}
+	}
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "user" {
 			last = strings.ToLower(messages[i].Content)
 			break
 		}
+	}
+	// Keep the offline demo usable for passengers who do not speak Russian.
+	switch language {
+	case "en":
+		return "I understand. Could you tell me what happens next?", nil
+	case "zh":
+		return "我明白了。请告诉我接下来该怎么办？", nil
+	case "de":
+		return "Ich verstehe. Können Sie mir sagen, was als Nächstes passiert?", nil
 	}
 
 	switch {
