@@ -66,7 +66,8 @@ go run ./cmd/server
 
 ## API
 
-Полное описание — в [`docs/api.md`](docs/api.md). Кратко:
+Полное описание — в [`docs/api.md`](docs/api.md), результаты локальной приёмки —
+в [`docs/acceptance.md`](docs/acceptance.md). Кратко:
 
 | Метод | Путь | Описание |
 |---|---|---|
