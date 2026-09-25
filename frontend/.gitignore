@@ -1,9 +1,10 @@
-node_modules
-dist
-dist-ssr
-*.local
+node_modules/
+.expo/
+dist/
+dist-web/
+web-build/
 *.log
+*.local
 .DS_Store
-.idea
-.vscode/*
-!.vscode/extensions.json
+.idea/
+.vscode/

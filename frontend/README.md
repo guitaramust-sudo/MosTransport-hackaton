@@ -1,32 +1,52 @@
-# React + TypeScript + Vite
+# Проводник ВСМ
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Мобильный тренажёр для подготовки проводников высокоскоростных магистралей. Приложение построено на Expo, React Native и TypeScript.
 
-Currently, two official plugins are available:
+## Возможности MVP
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- главная панель с уровнем, XP и недельным прогрессом;
+- каталог учебных сценариев;
+- интерактивная смена с параллельными событиями;
+- независимые метрики безопасности и лояльности;
+- критические события с таймером;
+- выбор действий и изменение состояния сессии;
+- итоговый разбор каждого решения;
+- профиль профессиональных компетенций.
 
-## React Compiler
+Демонстрационный сценарий работает локально. Backend не требуется для запуска интерфейса и в рамках этой реализации не изменялся.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Запуск
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cd frontend
+npm install
+npm start
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+После запуска отсканируйте QR-код в Expo Go или выберите платформу в терминале.
+
+```bash
+npm run android
+npm run ios
+npm run web
+```
+
+Для iOS-сборки без Expo Go требуется macOS. Проверка типов:
+
+```bash
+npm run typecheck
+```
+
+## Структура
+
+```text
+src/
+├── app/          # Redux store и состояние сессии
+├── components/   # переиспользуемые компоненты
+├── data/         # демонстрационные сценарии
+├── helpers/      # тема, токены и функции
+├── pages/        # экраны приложения
+└── types/        # типы сущностей
+```
+
+React Query подключён в корне приложения и готов для интеграции с REST API. Redux хранит навигацию демо-версии и состояние текущей игровой сессии, поэтому данные не передаются через цепочки props.

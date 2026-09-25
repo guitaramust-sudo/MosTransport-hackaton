@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Проводник ВСМ",
+    "slug": "vsm-conductor-trainer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F4F7F8",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ru.moscowtransport.vsmtrainer"
+    },
+    "android": {
+      "package": "ru.moscowtransport.vsmtrainer",
+      "predictiveBackGestureEnabled": false
+    }
+  }
+}
