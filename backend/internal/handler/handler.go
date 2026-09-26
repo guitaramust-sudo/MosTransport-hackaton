@@ -13,6 +13,7 @@ type Handlers struct {
 	Profile   *service.ProfileService
 	Session   *service.SessionService
 	Situation *service.SituationService
+	Admin     *service.AdminService
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

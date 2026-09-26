@@ -66,8 +66,9 @@ func (s *SituationService) Get(ctx context.Context, playerID, situationID uuid.U
 	return &sit, messages, nil
 }
 
-// SendMessage processes one text reply from the player.
-func (s *SituationService) SendMessage(ctx context.Context, playerID, situationID uuid.UUID, text string) (*TurnResult, error) {
+// SendMessage processes one text reply from the player. inputMode records the
+// channel the reply came through ("text" or "voice") and may be nil.
+func (s *SituationService) SendMessage(ctx context.Context, playerID, situationID uuid.UUID, text string, inputMode *string) (*TurnResult, error) {
 	sit, err := s.store.GetSituation(ctx, situationID)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
@@ -96,6 +97,7 @@ func (s *SituationService) SendMessage(ctx context.Context, playerID, situationI
 		if err != nil {
 			return nil, err
 		}
+		s.spawnNext(ctx, sit.SessionID)
 		turnCount, _ := s.store.CountPlayerMessages(ctx, situationID)
 		return &TurnResult{SituationID: situationID, Loyalty: result.Loyalty, Safety: result.Safety,
 			Status: domain.SituationStatusClosed, Outcome: &result.Outcome, TimerDeadline: sit.TimerDeadline,
@@ -112,12 +114,13 @@ func (s *SituationService) SendMessage(ctx context.Context, playerID, situationI
 		slog.Error("passenger chat failed", "situation_id", situationID, "error", err)
 		reply = "Понимаю… И что вы предлагаете сделать?"
 	}
-	turnCount, err := s.store.AppendTurn(ctx, situationID, playerID, text, reply, escalationTargets(text))
+	turnCount, err := s.store.AppendTurn(ctx, situationID, playerID, text, reply, escalationTargets(text), inputMode)
 	if errors.Is(err, repo.ErrDeadlineExceeded) {
 		result, closeErr := s.finishLoaded(ctx, sit, time.Now())
 		if closeErr != nil {
 			return nil, closeErr
 		}
+		s.spawnNext(ctx, sit.SessionID)
 		turnCount, _ := s.store.CountPlayerMessages(ctx, situationID)
 		return &TurnResult{SituationID: situationID, Loyalty: result.Loyalty, Safety: result.Safety,
 			Status: domain.SituationStatusClosed, Outcome: &result.Outcome, TimerDeadline: sit.TimerDeadline,

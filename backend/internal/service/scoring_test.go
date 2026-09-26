@@ -78,3 +78,27 @@ func TestForcedTimeoutStillScoresFacts(t *testing.T) {
 		t.Fatalf("forced timeout = %+v", got)
 	}
 }
+
+func TestEscalationSatisfiesLinkedPoint(t *testing.T) {
+	scenario := content.Scenario{TimeLimitSec: 60}
+	scenario.CorrectCompletion.MustConvey = []content.MustConvey{
+		{ID: "A", Desc: "Уточнить, где запах сильнее"},
+		{ID: "B", Desc: "Предупредить пассажиров держаться подальше"},
+		{ID: "C", Desc: "Сообщить начальнику поезда о запахе", EscalationTarget: content.TargetTrainChief},
+	}
+	scenario.CorrectCompletion.Escalation = content.Escalation{Required: true, To: []string{content.TargetTrainChief}}
+
+	// The LLM reports everything missed, but the player escalated to
+	// train_chief, so the escalation-linked point C must be auto-conveyed.
+	got := EvaluateScore(scenario, llm.ScoreResult{Conveyed: []string{}}, []string{content.TargetTrainChief}, 30*time.Second, false)
+
+	if len(got.Conveyed) != 1 || got.Conveyed[0] != "C" {
+		t.Fatalf("conveyed = %v, want [C]", got.Conveyed)
+	}
+	if len(got.Missed) != 2 || contains(got.Missed, "C") {
+		t.Fatalf("missed = %v, want [A B]", got.Missed)
+	}
+	if got.Outcome != "fail" {
+		t.Fatalf("outcome = %s, want fail (2 of 3 still missed)", got.Outcome)
+	}
+}

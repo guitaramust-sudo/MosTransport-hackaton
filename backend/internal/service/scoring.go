@@ -52,7 +52,7 @@ func EvaluateScore(scenario content.Scenario, observed llm.ScoreResult, actualEs
 		conveyed[strings.TrimSpace(id)] = true
 	}
 	for _, point := range scenario.CorrectCompletion.MustConvey {
-		if conveyed[point.ID] {
+		if conveyed[point.ID] || (point.EscalationTarget != "" && contains(actualEscalations, point.EscalationTarget)) {
 			result.Conveyed = append(result.Conveyed, point.ID)
 		} else {
 			result.Missed = append(result.Missed, point.ID)

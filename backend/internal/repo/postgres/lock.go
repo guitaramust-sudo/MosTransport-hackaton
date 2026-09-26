@@ -20,8 +20,7 @@ func (l *lockedSituation) Situation() domain.Situation { return l.sit }
 
 func (l *lockedSituation) ListMessages(ctx context.Context) ([]domain.Message, error) {
 	rows, err := l.tx.Query(ctx,
-		`SELECT id, situation_id, role, content, category, created_at
-		 FROM messages WHERE situation_id = $1 ORDER BY id`, l.sit.ID)
+		`SELECT `+messageColumns+` FROM messages WHERE situation_id = $1 ORDER BY id`, l.sit.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +28,7 @@ func (l *lockedSituation) ListMessages(ctx context.Context) ([]domain.Message, e
 	var messages []domain.Message
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.SituationID, &m.Role, &m.Content, &m.Category, &m.CreatedAt); err != nil {
+		if err := rows.Scan(scanMessage(&m)...); err != nil {
 			return nil, err
 		}
 		messages = append(messages, m)

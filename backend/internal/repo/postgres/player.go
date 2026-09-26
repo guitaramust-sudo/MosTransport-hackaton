@@ -3,36 +3,52 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/mostransport/vsm-trainer/internal/domain"
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
+const playerColumns = `id, email, username, password_hash, role, display_name, source_system, external_user_id, assigned_class_ids, depot_id, brigade_id, total_xp, created_at`
+
+func scanPlayer(p *domain.Player) []any {
+	return []any{
+		&p.ID, &p.Email, &p.Username, &p.PasswordHash, &p.Role,
+		&p.DisplayName, &p.SourceSystem, &p.ExternalUserID, &p.AssignedClassIDs,
+		&p.DepotID, &p.BrigadeID, &p.TotalXP, &p.CreatedAt,
+	}
+}
+
 func (s *Store) CreatePlayer(ctx context.Context, email, username, passwordHash string) (domain.Player, error) {
 	var p domain.Player
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO players (email, username, password_hash)
-		 VALUES ($1, $2, $3)
-		 RETURNING id, email, username, password_hash, total_xp, created_at`,
+		`INSERT INTO players (email, username, password_hash) VALUES ($1, $2, $3) RETURNING `+playerColumns,
 		email, username, passwordHash,
-	).Scan(&p.ID, &p.Email, &p.Username, &p.PasswordHash, &p.TotalXP, &p.CreatedAt)
+	).Scan(scanPlayer(&p)...)
 	return p, err
 }
 
 func (s *Store) GetPlayerByEmail(ctx context.Context, email string) (domain.Player, error) {
-	return s.scanPlayer(ctx, `SELECT id, email, username, password_hash, total_xp, created_at FROM players WHERE email = $1`, email)
+	return s.scanPlayer(ctx, `SELECT `+playerColumns+` FROM players WHERE email = $1`, email)
 }
 
 func (s *Store) GetPlayerByID(ctx context.Context, id uuid.UUID) (domain.Player, error) {
-	return s.scanPlayer(ctx, `SELECT id, email, username, password_hash, total_xp, created_at FROM players WHERE id = $1`, id)
+	return s.scanPlayer(ctx, `SELECT `+playerColumns+` FROM players WHERE id = $1`, id)
+}
+
+func (s *Store) GetPlayerByExternal(ctx context.Context, sourceSystem, externalUserID string) (domain.Player, error) {
+	return s.scanPlayer(ctx,
+		`SELECT `+playerColumns+` FROM players WHERE source_system = $1 AND external_user_id = $2`,
+		sourceSystem, externalUserID)
 }
 
 func (s *Store) scanPlayer(ctx context.Context, q string, args ...any) (domain.Player, error) {
 	var p domain.Player
-	err := s.pool.QueryRow(ctx, q, args...).Scan(&p.ID, &p.Email, &p.Username, &p.PasswordHash, &p.TotalXP, &p.CreatedAt)
+	err := s.pool.QueryRow(ctx, q, args...).Scan(scanPlayer(&p)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, repo.ErrNotFound
 	}
@@ -45,12 +61,14 @@ func (s *Store) AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) erro
 	return err
 }
 
-func (s *Store) AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp int) error {
+func (s *Store) AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp, evidence int) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO player_competencies (player_id, competency_id, xp)
-		 SELECT $1, id, $3 FROM competencies WHERE code = $2
-		 ON CONFLICT (player_id, competency_id) DO UPDATE SET xp = player_competencies.xp + EXCLUDED.xp`,
-		playerID, competencyCode, xp)
+		`INSERT INTO player_competencies (player_id, competency_id, xp, evidence_count)
+		 SELECT $1, id, $3, $4 FROM competencies WHERE code = $2
+		 ON CONFLICT (player_id, competency_id)
+		 DO UPDATE SET xp = player_competencies.xp + EXCLUDED.xp,
+		               evidence_count = player_competencies.evidence_count + EXCLUDED.evidence_count`,
+		playerID, competencyCode, xp, evidence)
 	return err
 }
 
@@ -74,7 +92,7 @@ func (s *Store) ListCompetencies(ctx context.Context) ([]domain.Competency, erro
 
 func (s *Store) GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) ([]domain.PlayerCompetency, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT pc.player_id, pc.competency_id, pc.xp
+		`SELECT pc.player_id, pc.competency_id, pc.xp, pc.evidence_count
 		 FROM player_competencies pc
 		 WHERE pc.player_id = $1
 		 ORDER BY pc.competency_id`, playerID)
@@ -86,7 +104,7 @@ func (s *Store) GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) (
 	var out []domain.PlayerCompetency
 	for rows.Next() {
 		var pc domain.PlayerCompetency
-		if err := rows.Scan(&pc.PlayerID, &pc.CompetencyID, &pc.XP); err != nil {
+		if err := rows.Scan(&pc.PlayerID, &pc.CompetencyID, &pc.XP, &pc.EvidenceCount); err != nil {
 			return nil, err
 		}
 		out = append(out, pc)
@@ -95,9 +113,31 @@ func (s *Store) GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) (
 }
 
 func (s *Store) Leaderboard(ctx context.Context, limit int) ([]domain.Player, error) {
+	return s.queryLeaderboard(ctx, ``, nil, limit)
+}
+
+func (s *Store) LeaderboardScoped(ctx context.Context, scope, groupID string, limit int) ([]domain.Player, error) {
+	var where string
+	var args []any
+	switch scope {
+	case "depot":
+		where = `WHERE depot_id = $1`
+		args = []any{groupID}
+	case "brigade":
+		where = `WHERE brigade_id = $1`
+		args = []any{groupID}
+	case "company":
+		// everyone
+	default:
+		return nil, fmt.Errorf("unsupported leaderboard scope %q", scope)
+	}
+	return s.queryLeaderboard(ctx, where, args, limit)
+}
+
+func (s *Store) queryLeaderboard(ctx context.Context, where string, args []any, limit int) ([]domain.Player, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, email, username, password_hash, total_xp, created_at
-		 FROM players ORDER BY total_xp DESC, created_at ASC LIMIT $1`, limit)
+		`SELECT `+playerColumns+` FROM players `+where+` ORDER BY total_xp DESC, created_at ASC LIMIT $`+fmt.Sprint(len(args)+1),
+		append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,10 +146,52 @@ func (s *Store) Leaderboard(ctx context.Context, limit int) ([]domain.Player, er
 	var out []domain.Player
 	for rows.Next() {
 		var p domain.Player
-		if err := rows.Scan(&p.ID, &p.Email, &p.Username, &p.PasswordHash, &p.TotalXP, &p.CreatedAt); err != nil {
+		if err := rows.Scan(scanPlayer(&p)...); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// UpsertExternalUser creates or refreshes a profile linked to an external HR
+// system. It is idempotent by (source_system, external_user_id).
+func (s *Store) UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error) {
+	existing, err := s.GetPlayerByExternal(ctx, sourceSystem, externalUserID)
+	if err == nil {
+		_, updateErr := s.pool.Exec(ctx,
+			`UPDATE players SET display_name = $3, assigned_class_ids = $4, depot_id = $5, brigade_id = $6
+			 WHERE id = $1`, existing.ID, sourceSystem, displayName, assignedClassIDs, depotID, brigadeID)
+		if updateErr != nil {
+			return domain.Player{}, false, updateErr
+		}
+		updated, err := s.GetPlayerByID(ctx, existing.ID)
+		return updated, false, err
+	}
+	if !errors.Is(err, repo.ErrNotFound) {
+		return domain.Player{}, false, err
+	}
+
+	email := fmt.Sprintf("%s@%s.external", externalUserID, sourceSystem)
+	username := externalUserID
+	if displayName != nil && *displayName != "" {
+		username = *displayName
+	}
+
+	var p domain.Player
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO players (email, username, password_hash, role, display_name, source_system, external_user_id, assigned_class_ids, depot_id, brigade_id)
+		 VALUES ($1, $2, '', 'user', $3, $4, $5, $6, $7, $8)
+		 RETURNING `+playerColumns,
+		email, username, displayName, sourceSystem, externalUserID, assignedClassIDs, depotID, brigadeID,
+	).Scan(scanPlayer(&p)...)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			p, getErr := s.GetPlayerByExternal(ctx, sourceSystem, externalUserID)
+			return p, false, getErr
+		}
+		return domain.Player{}, false, err
+	}
+	return p, true, nil
 }

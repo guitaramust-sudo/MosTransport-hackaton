@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -37,7 +38,11 @@ func (s *SituationService) Finish(ctx context.Context, playerID, situationID uui
 	if sit.Status != domain.SituationStatusActive {
 		return nil, ErrSituationClosed
 	}
-	return s.finishLoaded(ctx, sit, time.Now())
+	summary, err := s.finishLoaded(ctx, sit, time.Now())
+	if err == nil {
+		s.spawnNext(ctx, sit.SessionID)
+	}
+	return summary, err
 }
 
 func (s *SituationService) Escalate(ctx context.Context, playerID, situationID uuid.UUID, target string) ([]string, error) {
@@ -101,6 +106,8 @@ func (s *SituationService) CloseExpired(ctx context.Context) error {
 		}
 		if _, err := s.finishLoaded(ctx, sit, time.Now()); err != nil {
 			slog.Error("timer close failed", "situation_id", id, "error", err)
+		} else {
+			s.spawnNext(ctx, sit.SessionID)
 		}
 	}
 	return nil
@@ -120,7 +127,17 @@ func (s *SituationService) finishLoaded(ctx context.Context, sit domain.Situatio
 		}
 		scenario, passenger, err := s.definitions(sit)
 		if err != nil {
-			return err
+			// Situations created before the scoring catalog have no content IDs
+			// and can never be scored. Close them gracefully so the timer
+			// closer stops retrying them on every tick.
+			outcome := "unfinished"
+			sit.Outcome = &outcome
+			sit.ClosedAt = &now
+			if closeErr := locked.Close(ctx, sit); closeErr != nil {
+				return closeErr
+			}
+			summary = &ScoreSummary{Outcome: outcome, Tone: "neutral", Loyalty: sit.Loyalty, Safety: sit.Safety}
+			return nil
 		}
 		messages, err := locked.ListMessages(ctx)
 		if err != nil {
@@ -187,6 +204,29 @@ func (s *SituationService) definitions(sit domain.Situation) (content.Scenario, 
 		return content.Scenario{}, content.Passenger{}, errors.New("situation content ID missing from catalog")
 	}
 	return scenario, passenger, nil
+}
+
+// spawnNext creates the next queued situation after the current one closes.
+func (s *SituationService) spawnNext(ctx context.Context, sessionID uuid.UUID) {
+	_, err := s.store.SpawnNextSituation(ctx, sessionID, func(scenarioID string) (domain.Situation, error) {
+		scenario, ok := s.scenarioByID(scenarioID)
+		if !ok {
+			return domain.Situation{}, fmt.Errorf("scenario %q missing from catalog", scenarioID)
+		}
+		return buildSituationDraft(scenario, pickPassenger(s.catalog)), nil
+	})
+	if err != nil {
+		slog.Error("spawn next situation failed", "session_id", sessionID, "error", err)
+	}
+}
+
+func (s *SituationService) scenarioByID(id string) (content.Scenario, bool) {
+	for _, scenario := range s.catalog.Scenarios {
+		if scenario.ID == id {
+			return scenario, true
+		}
+	}
+	return content.Scenario{}, false
 }
 
 func validTarget(target string) bool {
