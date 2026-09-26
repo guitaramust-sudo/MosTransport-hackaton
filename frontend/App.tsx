@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react'
+import {
+  GolosText_400Regular,
+  GolosText_500Medium,
+  GolosText_600SemiBold,
+  GolosText_700Bold,
+  GolosText_800ExtraBold,
+  GolosText_900Black,
+  useFonts,
+} from '@expo-google-fonts/golos-text'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StatusBar } from 'expo-status-bar'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
@@ -17,6 +26,14 @@ const queryClient = new QueryClient({
 
 export default function App() {
   const [assetsReady, setAssetsReady] = useState(false)
+  const [fontsReady, fontError] = useFonts({
+    GolosText_400Regular,
+    GolosText_500Medium,
+    GolosText_600SemiBold,
+    GolosText_700Bold,
+    GolosText_800ExtraBold,
+    GolosText_900Black,
+  })
 
   useEffect(() => {
     let mounted = true
@@ -32,7 +49,11 @@ export default function App() {
     }
   }, [])
 
-  if (!assetsReady) {
+  useEffect(() => {
+    if (fontError) console.warn('Interface font preload failed', fontError)
+  }, [fontError])
+
+  if (!assetsReady || (!fontsReady && !fontError)) {
     return (
       <View style={styles.loader}>
         <StatusBar style="dark" />

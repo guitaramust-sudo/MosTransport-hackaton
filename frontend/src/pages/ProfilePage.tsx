@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { StyleSheet, Text } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { api } from '../api/client'
 import { signedOut, useAppDispatch } from '../app/store'
 import { Button, Card, ErrorText, Page } from '../components/UI'
+import { Text } from '../components/Typography'
 import { colors } from '../helpers/theme'
 import type { Profile } from '../types'
 

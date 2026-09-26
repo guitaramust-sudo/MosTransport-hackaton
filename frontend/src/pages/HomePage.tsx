@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { StyleSheet, Text } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { api } from '../api/client'
 import { navigate, setPlayer, setShift, useAppDispatch, useAppSelector } from '../app/store'
 import { Button, Card, ErrorText, Page } from '../components/UI'
+import { Text } from '../components/Typography'
 import { colors } from '../helpers/theme'
 
 export function HomePage() {

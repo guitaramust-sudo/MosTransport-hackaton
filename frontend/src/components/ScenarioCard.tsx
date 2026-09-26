@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, View } from 'react-native'
+import { Text } from './Typography'
 import { colors, radius, shadow } from '../helpers/theme'
 import type { Scenario } from '../types'
 

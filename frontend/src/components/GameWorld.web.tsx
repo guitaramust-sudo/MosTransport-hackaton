@@ -1,11 +1,12 @@
 import { Suspense, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrthographicCamera, useAnimations, useGLTF } from '@react-three/drei'
 import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
 import { colors } from '../helpers/theme'
 import type { GameQuest } from '../types'
+import { Text } from './Typography'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)

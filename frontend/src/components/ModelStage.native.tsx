@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import { Text } from './Typography'
 import { Canvas } from '@react-three/fiber/native'
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei/native'
 import type { Group } from 'three'

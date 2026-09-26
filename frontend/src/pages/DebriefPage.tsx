@@ -1,7 +1,8 @@
-import { StyleSheet, Text } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { navigate, useAppDispatch, useAppSelector } from '../app/store'
 import { MetricBar } from '../components/MetricBar'
 import { Button, Card, Page } from '../components/UI'
+import { Text } from '../components/Typography'
 import { colors } from '../helpers/theme'
 
 const outcomeLabels: Record<string, string> = { success: 'Успех', partial: 'Частично', fail: 'Ошибка', timeout: 'Время вышло' }

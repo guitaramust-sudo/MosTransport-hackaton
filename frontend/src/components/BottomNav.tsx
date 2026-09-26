@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, View } from 'react-native'
+import { Text } from './Typography'
 import { navigate, useAppDispatch, useAppSelector } from '../app/store'
 import { colors } from '../helpers/theme'
 import type { AppScreen } from '../types'

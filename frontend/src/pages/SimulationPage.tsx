@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api } from '../api/client'
 import { navigate, refreshShift, selectSituation, setBreakdown, useAppDispatch, useAppSelector } from '../app/store'
 import { GameWorld } from '../components/GameWorld'
 import { MetricBar } from '../components/MetricBar'
+import { Text, TextInput } from '../components/Typography'
 import { colors, radius, shadow } from '../helpers/theme'
 import type { GameQuest, SessionResponse, Situation, SituationResponse } from '../types'
 

@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { StyleSheet, Text, TextInput } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { api, setTokens } from '../api/client'
 import { signedIn, useAppDispatch } from '../app/store'
 import { Button, Card, ErrorText, Page } from '../components/UI'
+import { Text, TextInput } from '../components/Typography'
 import { colors, radius } from '../helpers/theme'
 
 export function AuthPage() {
