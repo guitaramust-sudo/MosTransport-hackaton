@@ -8,24 +8,142 @@
       "id": "service_request",
       "text": "Пассажир просит услугу, наличие которой пока не проверено.",
       "choices": [
-        {"id": "check_availability", "text": "Проверить наличие прежде чем обещать", "next_event": "confirmed_request", "effects": {"availability_checked": true}, "loyalty_delta": 3, "explanation": "Игрок проверил факт до обещания."},
-        {"id": "promise_immediately", "text": "Пообещать услугу без проверки", "next_event": "unconfirmed_promise", "effects": {"promise_unverified": true}, "loyalty_delta": -4, "explanation": "Обещание дано без проверки доступности."}
-      ]
+        {
+          "id": "check_availability",
+          "text": "Проверить наличие прежде чем обещать",
+          "next_event": "confirmed_request",
+          "effects": {
+            "availability_checked": true
+          },
+          "loyalty_delta": 3,
+          "explanation": "Игрок проверил факт до обещания."
+        },
+        {
+          "id": "promise_immediately",
+          "text": "Пообещать услугу без проверки",
+          "next_event": "unconfirmed_promise",
+          "effects": {
+            "promise_unverified": true
+          },
+          "loyalty_delta": -4,
+          "explanation": "Обещание дано без проверки доступности."
+        }
+      ],
+      "location": "passenger_zone"
     },
     {
       "id": "confirmed_request",
       "text": "Услуга доступна. Пассажир ждёт ответа.",
       "choices": [
-        {"id": "explain_next_step", "text": "Сообщить пассажиру следующий шаг", "requires": ["availability_checked"], "effects": {"request_resolved": true}, "loyalty_delta": 4, "explanation": "Игрок дал подтверждённый ответ."}
-      ]
+        {
+          "id": "explain_next_step",
+          "text": "Сообщить пассажиру следующий шаг",
+          "requires": [
+            "availability_checked"
+          ],
+          "effects": {
+            "request_resolved": true
+          },
+          "loyalty_delta": 4,
+          "explanation": "Игрок дал подтверждённый ответ."
+        }
+      ],
+      "location": "passenger_zone"
     },
     {
       "id": "unconfirmed_promise",
       "text": "Услуга недоступна. Пассажир напоминает об обещании.",
       "choices": [
-        {"id": "correct_promise", "text": "Признать ошибку и объяснить альтернативу", "requires": ["promise_unverified"], "effects": {"promise_corrected": true}, "loyalty_delta": 2, "explanation": "Игрок исправил обещание, но первоначальная ошибка сохранилась в пути."},
-        {"id": "ignore_followup", "text": "Оставить обращение без ответа", "requires": ["promise_unverified"], "effects": {"request_abandoned": true}, "loyalty_delta": -8, "explanation": "Игрок не вернулся к пассажиру после обещания."}
+        {
+          "id": "correct_promise",
+          "text": "Признать ошибку и объяснить альтернативу",
+          "requires": [
+            "promise_unverified"
+          ],
+          "effects": {
+            "promise_corrected": true
+          },
+          "loyalty_delta": 2,
+          "explanation": "Игрок исправил обещание, но первоначальная ошибка сохранилась в пути."
+        },
+        {
+          "id": "ignore_followup",
+          "text": "Оставить обращение без ответа",
+          "requires": [
+            "promise_unverified"
+          ],
+          "effects": {
+            "request_abandoned": true
+          },
+          "loyalty_delta": -8,
+          "explanation": "Игрок не вернулся к пассажиру после обещания."
+        }
+      ],
+      "location": "passenger_zone"
+    },
+    {
+      "id": "seat_conflict",
+      "text": "Два пассажира спорят о месте. Обращение уже слышно в салоне.",
+      "location": "passenger_zone",
+      "choices": [
+        {
+          "id": "check_tickets",
+          "text": "Спокойно проверить данные обоих билетов",
+          "effects": {
+            "seat_conflict_resolved": true
+          },
+          "loyalty_delta": 3,
+          "explanation": "Игрок проверил факты перед решением спора."
+        },
+        {
+          "id": "dismiss_dispute",
+          "text": "Отмахнуться от обращения",
+          "effects": {
+            "seat_conflict_ignored": true
+          },
+          "loyalty_delta": -5,
+          "explanation": "Обращение осталось без рассмотрения."
+        }
       ]
+    },
+    {
+      "id": "wet_floor",
+      "text": "В багажной зоне виден мокрый участок пола.",
+      "location": "luggage_zone",
+      "hidden": true,
+      "cue": "Блеск на полу у багажной стойки",
+      "choices": [
+        {
+          "id": "report_spill",
+          "text": "Предупредить пассажиров и организовать устранение",
+          "effects": {
+            "spill_reported": true
+          },
+          "explanation": "Игрок заметил препятствие и организовал безопасное устранение."
+        },
+        {
+          "id": "walk_past",
+          "text": "Пройти мимо",
+          "effects": {
+            "spill_ignored": true
+          },
+          "safety_delta": -10,
+          "explanation": "Замеченная опасность осталась без реакции."
+        }
+      ]
+    }
+  ],
+  "start_events": [
+    "service_request",
+    "seat_conflict",
+    "wet_floor"
+  ],
+  "start_location": "passenger_zone",
+  "edges": [
+    {
+      "from": "passenger_zone",
+      "to": "luggage_zone",
+      "travel_s": 8
     }
   ]
 }

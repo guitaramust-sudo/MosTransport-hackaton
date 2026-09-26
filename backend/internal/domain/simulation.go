@@ -15,6 +15,10 @@ type SimulationRun struct {
 	StateVersion     int             `json:"state_version"`
 	Status           string          `json:"status"`
 	CurrentEventID   string          `json:"current_event_id,omitempty"`
+	ActiveEventIDs   []string        `json:"active_event_ids"`
+	ObservedEvents   map[string]bool `json:"observed_events"`
+	Location         string          `json:"location"`
+	GameTimeS        int             `json:"game_time_s"`
 	Flags            map[string]bool `json:"flags"`
 	Loyalty          int             `json:"loyalty"`
 	Safety           int             `json:"safety"`

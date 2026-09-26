@@ -48,6 +48,9 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	if err != nil || first.Event == nil || len(first.Event.Choices) != 2 {
 		t.Fatalf("start: %+v, %v", first, err)
 	}
+	if len(first.Events) != 2 {
+		t.Fatalf("expected two visible events and one hidden cue: %+v", first.Events)
+	}
 	raw, _ := json.Marshal(first)
 	if stringContainsAny(string(raw), "availability_checked", "loyalty_delta", "explanation") {
 		t.Fatalf("private choice effects leaked: %s", raw)
@@ -67,8 +70,27 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	if _, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 0, "explain_next_step"); !errors.Is(err, repo.ErrConflict) {
 		t.Fatalf("stale version: %v", err)
 	}
-	completed, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 1, "explain_next_step")
-	if err != nil || completed.Run.Status != "finished" || completed.Run.Loyalty != 87 || completed.Event != nil {
+	continued, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 1, "explain_next_step")
+	if err != nil || continued.Run.Status != "active" || continued.Run.Loyalty != 87 || continued.Event.ID != "seat_conflict" {
+		t.Fatalf("other event remained active: %+v, %v", continued, err)
+	}
+	seat, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 2, "check_tickets")
+	if err != nil || seat.Run.StateVersion != 3 || len(seat.Events) != 0 {
+		t.Fatalf("hidden event leaked or seat choice failed: %+v, %v", seat, err)
+	}
+	if _, err := svc.ActionCommand(ctx, player.ID, first.Run.ID, uuid.New(), 3, simulation.Command{EventID: "wet_floor", ChoiceID: "report_spill"}); !errors.Is(err, simulation.ErrInvalidChoice) {
+		t.Fatalf("hidden event was playable before discovery: %v", err)
+	}
+	moved, err := svc.ActionCommand(ctx, player.ID, first.Run.ID, uuid.New(), 3, simulation.Command{ActionID: "move_to", Target: "luggage_zone"})
+	if err != nil || moved.Run.Location != "luggage_zone" || moved.Run.GameTimeS != 26 || len(moved.Events) != 0 || len(moved.ObservableCues) != 1 {
+		t.Fatalf("movement or hidden cue: %+v, %v", moved, err)
+	}
+	observed, err := svc.ActionCommand(ctx, player.ID, first.Run.ID, uuid.New(), 4, simulation.Command{ActionID: "inspect"})
+	if err != nil || observed.Run.GameTimeS != 31 || len(observed.Events) != 1 || observed.Event.ID != "wet_floor" {
+		t.Fatalf("inspection: %+v, %v", observed, err)
+	}
+	completed, err := svc.ActionCommand(ctx, player.ID, first.Run.ID, uuid.New(), 5, simulation.Command{EventID: "wet_floor", ChoiceID: "report_spill"})
+	if err != nil || completed.Run.Status != "finished" || completed.Event != nil {
 		t.Fatalf("completion: %+v, %v", completed, err)
 	}
 	svc.template.Events[0].Choices[0].NextEvent = "confirmed_request"

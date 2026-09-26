@@ -27,9 +27,18 @@ type Choice struct {
 }
 
 type Event struct {
-	ID      string   `json:"id"`
-	Text    string   `json:"text"`
-	Choices []Choice `json:"choices"`
+	ID       string   `json:"id"`
+	Text     string   `json:"text"`
+	Location string   `json:"location"`
+	Hidden   bool     `json:"hidden,omitempty"`
+	Cue      string   `json:"cue,omitempty"`
+	Choices  []Choice `json:"choices"`
+}
+
+type Edge struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	TravelS int    `json:"travel_s"`
 }
 
 type Template struct {
@@ -39,6 +48,9 @@ type Template struct {
 	ReviewerID       string   `json:"reviewer_id,omitempty"`
 	SourceRefs       []string `json:"source_refs,omitempty"`
 	StartEvent       string   `json:"start_event"`
+	StartEvents      []string `json:"start_events"`
+	StartLocation    string   `json:"start_location"`
+	Edges            []Edge   `json:"edges"`
 	Events           []Event  `json:"events"`
 }
 
@@ -68,10 +80,43 @@ func (t Template) Validate() error {
 		}
 		events[event.ID] = true
 	}
-	if !events[t.StartEvent] {
+	if !events[t.StartEvent] || t.StartLocation == "" || len(t.StartEvents) < 2 {
 		return errors.New("start event is missing")
 	}
+	starts := map[string]bool{}
+	for _, id := range t.StartEvents {
+		if !events[id] || starts[id] {
+			return fmt.Errorf("start event %q is missing", id)
+		}
+		starts[id] = true
+	}
+	if !starts[t.StartEvent] {
+		return errors.New("primary start event is not active")
+	}
+	reachable := map[string]bool{t.StartLocation: true}
+	for changed := true; changed; {
+		changed = false
+		for _, edge := range t.Edges {
+			if reachable[edge.From] && !reachable[edge.To] {
+				reachable[edge.To], changed = true, true
+			}
+			if reachable[edge.To] && !reachable[edge.From] {
+				reachable[edge.From], changed = true, true
+			}
+		}
+	}
+	for _, edge := range t.Edges {
+		if edge.From == "" || edge.To == "" || edge.TravelS <= 0 {
+			return errors.New("invalid travel edge")
+		}
+	}
 	for _, event := range t.Events {
+		if event.Location == "" || (event.Hidden && event.Cue == "") {
+			return fmt.Errorf("event %q needs location and hidden cue", event.ID)
+		}
+		if !reachable[event.Location] {
+			return fmt.Errorf("event %q has unreachable location %q", event.ID, event.Location)
+		}
 		choices := map[string]bool{}
 		for _, choice := range event.Choices {
 			if choice.ID == "" || choices[choice.ID] || choice.Explanation == "" || (choice.NextEvent != "" && !events[choice.NextEvent]) {
@@ -92,16 +137,73 @@ func (t Template) Event(id string) (Event, bool) {
 	return Event{}, false
 }
 
-func (t Template) Apply(run domain.SimulationRun, choiceID string) (domain.SimulationRun, error) {
+type Command struct {
+	ActionID string
+	Target   string
+	EventID  string
+	ChoiceID string
+}
+
+func (t Template) Apply(run domain.SimulationRun, command Command) (domain.SimulationRun, error) {
 	if run.Status != "active" {
 		return run, ErrFinished
 	}
-	event, ok := t.Event(run.CurrentEventID)
-	if !ok {
+	if len(run.ActiveEventIDs) == 0 && run.CurrentEventID != "" {
+		run.ActiveEventIDs = []string{run.CurrentEventID}
+	}
+	switch command.ActionID {
+	case "move_to":
+		for _, edge := range t.Edges {
+			if (edge.From == run.Location && edge.To == command.Target) || (edge.To == run.Location && edge.From == command.Target) {
+				run.Location = command.Target
+				run.GameTimeS += edge.TravelS
+				run.Path = append(run.Path, "move_to:"+command.Target)
+				return run, nil
+			}
+		}
+		return run, ErrInvalidChoice
+	case "inspect":
+		found := false
+		if run.ObservedEvents == nil {
+			run.ObservedEvents = map[string]bool{}
+		}
+		for _, id := range run.ActiveEventIDs {
+			event, ok := t.Event(id)
+			if ok && event.Hidden && event.Location == run.Location && !run.ObservedEvents[id] {
+				run.ObservedEvents[id] = true
+				found = true
+			}
+		}
+		if !found {
+			return run, ErrInvalidChoice
+		}
+		run.GameTimeS += 5
+		run.Path = append(run.Path, "inspect:"+run.Location)
+		return run, nil
+	case "", "choose":
+	default:
+		return run, ErrInvalidChoice
+	}
+	eventID := command.EventID
+	if eventID == "" {
+		eventID = run.CurrentEventID
+	}
+	index := -1
+	for i, id := range run.ActiveEventIDs {
+		if id == eventID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return run, ErrInvalidChoice
+	}
+	event, ok := t.Event(eventID)
+	if !ok || event.Location != run.Location || (event.Hidden && !run.ObservedEvents[event.ID]) {
 		return run, ErrInvalidChoice
 	}
 	for _, choice := range event.Choices {
-		if choice.ID != choiceID {
+		if choice.ID != command.ChoiceID {
 			continue
 		}
 		for _, required := range choice.Requires {
@@ -117,10 +219,18 @@ func (t Template) Apply(run domain.SimulationRun, choiceID string) (domain.Simul
 		}
 		run.Loyalty = clamp(run.Loyalty + choice.LoyaltyDelta)
 		run.Safety = clamp(run.Safety + choice.SafetyDelta)
+		run.GameTimeS += 6
 		run.Path = append(run.Path, event.ID+":"+choice.ID)
-		run.CurrentEventID = choice.NextEvent
 		if choice.NextEvent == "" {
+			run.ActiveEventIDs = append(run.ActiveEventIDs[:index], run.ActiveEventIDs[index+1:]...)
+		} else {
+			run.ActiveEventIDs[index] = choice.NextEvent
+		}
+		if len(run.ActiveEventIDs) == 0 {
 			run.Status = "finished"
+			run.CurrentEventID = ""
+		} else {
+			run.CurrentEventID = run.ActiveEventIDs[0]
 		}
 		return run, nil
 	}

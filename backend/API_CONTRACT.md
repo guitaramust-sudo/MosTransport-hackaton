@@ -204,12 +204,18 @@
     "id": "uuid", "scenario_id": "demo_service_branch",
     "scenario_version": "1.0.0", "content_validation_status": "draft",
     "state_version": 0, "status": "active", "loyalty": 80, "safety": 100,
-    "path": []
+    "location": "passenger_zone", "game_time_s": 0, "path": []
   },
   "event": {
-    "id": "service_request", "text": "Пассажир просит услугу...",
+    "id": "service_request", "location": "passenger_zone",
+    "text": "Пассажир просит услугу...",
     "choices": [{"id": "check_availability", "text": "Проверить наличие прежде чем обещать"}]
-  }
+  },
+  "events": [
+    {"id":"service_request", "location":"passenger_zone", "text":"...", "choices":[{"id":"check_availability","text":"..."}]},
+    {"id":"seat_conflict", "location":"passenger_zone", "text":"...", "choices":[{"id":"check_tickets","text":"..."}]}
+  ],
+  "observable_cues": []
 }
 ```
 
@@ -220,8 +226,15 @@
 получает `409`. Невозможный выбор получает `400`, чужая смена — `404`.
 Правила выбора и внутренние флаги остаются на сервере. Конфигурация сценария
 закрепляется в записи смены, поэтому изменение файла не меняет уже начатый рейс.
-Это пока отдельный демонстрационный путь: движение, параллельные события и
-полный debrief ещё не реализованы.
+`events` содержит видимые активные задачи; `event` — текущую задачу для простого
+клиента. Скрытая задача не показывается до наблюдения. В багажной зоне появляется
+`observable_cues`; команда `{"action_id":"inspect"}` раскрывает событие.
+`{"action_id":"move_to","target":"luggage_zone"}` перемещает игрока между
+соседними зонами. Для выбора из нескольких задач можно передать `event_id` с
+`choice_id`. Каждая команда требует новый `command_id` и текущую версию.
+Движение, осмотр и выбор увеличивают `game_time_s` на сервере; их длительности
+пока являются демонстрационным балансом. Таймер с последствиями и полный
+debrief ещё не реализованы.
 
 ### POST `/api/session/start`
 

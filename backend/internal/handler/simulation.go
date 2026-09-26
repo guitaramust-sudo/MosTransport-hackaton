@@ -49,6 +49,9 @@ func (h *Handlers) GetSimulation(w http.ResponseWriter, r *http.Request) {
 type simulationActionRequest struct {
 	CommandID            uuid.UUID `json:"command_id"`
 	ExpectedStateVersion int       `json:"expected_state_version"`
+	ActionID             string    `json:"action_id"`
+	EventID              string    `json:"event_id"`
+	Target               string    `json:"target"`
 	ChoiceID             string    `json:"choice_id"`
 }
 
@@ -60,11 +63,12 @@ func (h *Handlers) SimulationAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req simulationActionRequest
-	if err := decodeJSON(r, &req); err != nil || req.CommandID == uuid.Nil || req.ExpectedStateVersion < 0 || req.ChoiceID == "" {
-		writeError(w, http.StatusBadRequest, "command_id, expected_state_version and choice_id required")
+	if err := decodeJSON(r, &req); err != nil || req.CommandID == uuid.Nil || req.ExpectedStateVersion < 0 || (req.ChoiceID == "" && req.ActionID == "") {
+		writeError(w, http.StatusBadRequest, "command_id, expected_state_version and action_id or choice_id required")
 		return
 	}
-	view, err := h.Simulation.Action(r.Context(), playerID, id, req.CommandID, req.ExpectedStateVersion, req.ChoiceID)
+	view, err := h.Simulation.ActionCommand(r.Context(), playerID, id, req.CommandID, req.ExpectedStateVersion,
+		simulation.Command{ActionID: req.ActionID, EventID: req.EventID, Target: req.Target, ChoiceID: req.ChoiceID})
 	switch {
 	case errors.Is(err, repo.ErrNotFound):
 		writeError(w, http.StatusNotFound, "simulation not found")
