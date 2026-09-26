@@ -83,6 +83,7 @@ func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (Simu
 		ActiveEventIDs: append([]string(nil), s.template.StartEvents...), ObservedEvents: map[string]bool{},
 		Location: s.template.StartLocation, Flags: map[string]bool{}, Loyalty: 80, Safety: 100,
 		Path: []string{}, StartedAt: now, DeadlineAt: deadline, ActionLog: []domain.SimulationLogEntry{}, TemplateSnapshot: snapshot,
+		PointsNamespace: s.namespace,
 	})
 	if err != nil {
 		return SimulationView{}, err
@@ -149,18 +150,22 @@ type SimulationDebriefEntry struct {
 }
 
 type SimulationResult struct {
-	SessionID          uuid.UUID                `json:"session_id"`
-	ScenarioVersion    string                   `json:"scenario_version"`
-	ScoringRuleVersion string                   `json:"scoring_rule_version"`
-	ValidationStatus   string                   `json:"validation_status"`
-	CompletedAt        *time.Time               `json:"completed_at"`
-	WorldSafetyCurrent int                      `json:"world_safety_current"`
-	SessionSafetyScore int                      `json:"session_safety_score"`
-	Loyalty            int                      `json:"loyalty"`
-	TimedOut           bool                     `json:"timed_out"`
-	SessionPass        bool                     `json:"session_pass"`
-	ActionLogHash      string                   `json:"action_log_hash"`
-	Debrief            []SimulationDebriefEntry `json:"debrief"`
+	SessionID              uuid.UUID                `json:"session_id"`
+	ScenarioVersion        string                   `json:"scenario_version"`
+	ScoringRuleVersion     string                   `json:"scoring_rule_version"`
+	ValidationStatus       string                   `json:"validation_status"`
+	CompletedAt            *time.Time               `json:"completed_at"`
+	WorldSafetyCurrent     int                      `json:"world_safety_current"`
+	SessionSafetyScore     int                      `json:"session_safety_score"`
+	Loyalty                int                      `json:"loyalty"`
+	TimedOut               bool                     `json:"timed_out"`
+	SessionPass            bool                     `json:"session_pass"`
+	ActionLogHash          string                   `json:"action_log_hash"`
+	Debrief                []SimulationDebriefEntry `json:"debrief"`
+	PointsNamespace        string                   `json:"points_namespace"`
+	LeaderboardPointsDelta int                      `json:"leaderboard_points_delta"`
+	LeaderboardPointsTotal int                      `json:"leaderboard_points_total"`
+	LeaderboardEligible    bool                     `json:"leaderboard_eligible"`
 }
 
 func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUID) (SimulationResult, error) {
@@ -172,6 +177,14 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 		return SimulationResult{}, ErrSimulationActive
 	}
 	if err := s.store.FinalizeSimulationRewards(ctx, run); err != nil {
+		return SimulationResult{}, err
+	}
+	pointsDelta, err := s.store.GetSimulationPoints(ctx, run.ID, run.PointsNamespace)
+	if err != nil {
+		return SimulationResult{}, err
+	}
+	pointsTotal, err := s.store.GetPlayerPointsTotal(ctx, playerID, run.PointsNamespace)
+	if err != nil {
 		return SimulationResult{}, err
 	}
 	template, err := s.templateFor(run)
@@ -206,6 +219,8 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 		ScoringRuleVersion: "simulation-demo-v1", ValidationStatus: template.ValidationStatus,
 		CompletedAt: run.FinishedAt, WorldSafetyCurrent: run.Safety, SessionSafetyScore: safetyScore,
 		Loyalty: run.Loyalty, TimedOut: run.TimedOut,
+		PointsNamespace: run.PointsNamespace, LeaderboardPointsDelta: pointsDelta,
+		LeaderboardPointsTotal: pointsTotal, LeaderboardEligible: pointsDelta > 0,
 		SessionPass:   simulationPass(run),
 		ActionLogHash: fmt.Sprintf("%x", sha256.Sum256(raw)), Debrief: debrief}, nil
 }

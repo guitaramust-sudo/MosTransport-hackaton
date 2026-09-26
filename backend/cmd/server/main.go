@@ -73,7 +73,7 @@ func run() error {
 	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace)
 	h := &handler.Handlers{
 		Auth:       auth,
-		Profile:    service.NewProfileService(store),
+		Profile:    service.NewProfileService(store, cfg.PointsNamespace),
 		Session:    service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation:  situations,
 		Admin:      service.NewAdminService(store, catalog),

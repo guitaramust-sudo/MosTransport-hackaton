@@ -271,7 +271,7 @@ func (s *SessionService) finishOnce(ctx context.Context, playerID, sessionID uui
 		breakdown.WorldSafetyCurrent = 100
 	}
 	breakdown.SessionPass = allResolved && len(situations) > 0
-	breakdown.LeaderboardPointsDelta = breakdown.TotalXP
+	breakdown.LeaderboardPointsDelta = 0
 
 	if wasActive {
 		awards := make(map[string]repo.CompetencyAward, len(competencyXP))
@@ -283,12 +283,12 @@ func (s *SessionService) finishOnce(ctx context.Context, playerID, sessionID uui
 		}
 	}
 
-	player, err := s.store.GetPlayerByID(ctx, playerID)
+	points, err := s.store.GetPlayerPointsTotal(ctx, playerID, s.pointsNamespace)
 	if err != nil {
 		return nil, err
 	}
-	breakdown.LeaderboardPointsTotal = player.TotalXP
-	breakdown.LeaderboardEligible = s.pointsNamespace == "official"
+	breakdown.LeaderboardPointsTotal = points
+	breakdown.LeaderboardEligible = false
 
 	return breakdown, nil
 }

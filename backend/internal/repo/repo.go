@@ -20,6 +20,12 @@ type CompetencyAward struct {
 	Evidence int
 }
 
+type PointsStanding struct {
+	PlayerID uuid.UUID
+	Username string
+	Points   int
+}
+
 // SimulationStore is separate from the legacy dialogue store while clients
 // migrate to the branching flow. The callback executes under a row lock.
 type SimulationStore interface {
@@ -29,6 +35,8 @@ type SimulationStore interface {
 	AdvanceSimulationTimer(ctx context.Context, runID, playerID uuid.UUID, apply func(domain.SimulationRun) (domain.SimulationRun, bool)) (domain.SimulationRun, error)
 	ListDueSimulationRuns(ctx context.Context, now time.Time) ([]domain.SimulationDueRun, error)
 	FinalizeSimulationRewards(ctx context.Context, run domain.SimulationRun) error
+	GetSimulationPoints(ctx context.Context, runID uuid.UUID, namespace string) (int, error)
+	GetPlayerPointsTotal(ctx context.Context, playerID uuid.UUID, namespace string) (int, error)
 	ListNotifications(ctx context.Context, playerID uuid.UUID) ([]domain.Notification, error)
 	GetChallengeProgress(ctx context.Context, playerID uuid.UUID, now time.Time) (domain.ChallengeProgress, error)
 }
@@ -55,6 +63,8 @@ type Store interface {
 	ListAchievementCodes(ctx context.Context, playerID uuid.UUID) ([]string, error)
 	Leaderboard(ctx context.Context, limit int) ([]domain.Player, error)
 	LeaderboardScoped(ctx context.Context, scope, groupID string, limit int) ([]domain.Player, error)
+	PointsLeaderboard(ctx context.Context, namespace, scope, groupID string) ([]PointsStanding, error)
+	GetPlayerPointsTotal(ctx context.Context, playerID uuid.UUID, namespace string) (int, error)
 	UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error)
 	GetPlayerByExternal(ctx context.Context, sourceSystem, externalUserID string) (domain.Player, error)
 

@@ -14,18 +14,24 @@ import (
 var ErrPlayerNotFound = errors.New("player not found")
 
 type ProfileService struct {
-	store repo.Store
+	store     repo.Store
+	namespace string
 }
 
-func NewProfileService(store repo.Store) *ProfileService {
-	return &ProfileService{store: store}
+func NewProfileService(store repo.Store, namespace ...string) *ProfileService {
+	ns := "demo"
+	if len(namespace) > 0 {
+		ns = namespace[0]
+	}
+	return &ProfileService{store: store, namespace: ns}
 }
 
 type Profile struct {
-	Player       domain.Player                 `json:"player"`
-	Level        int                           `json:"level"`
-	Competencies []domain.CompetencyAssessment `json:"competencies"`
-	Achievements []string                      `json:"achievements"`
+	Player                 domain.Player                 `json:"player"`
+	Level                  int                           `json:"level"`
+	Competencies           []domain.CompetencyAssessment `json:"competencies"`
+	Achievements           []string                      `json:"achievements"`
+	LeaderboardPointsTotal int                           `json:"leaderboard_points_total"`
 }
 
 // levelForXP is a prototype level curve; it is not a normative ВСМ value.
@@ -58,11 +64,16 @@ func (s *ProfileService) Get(ctx context.Context, playerID uuid.UUID) (*Profile,
 	if err != nil {
 		return nil, err
 	}
+	points, err := s.store.GetPlayerPointsTotal(ctx, playerID, s.namespace)
+	if err != nil {
+		return nil, err
+	}
 	return &Profile{
-		Player:       player,
-		Level:        levelForXP(player.TotalXP),
-		Competencies: assessments,
-		Achievements: achievements,
+		Player:                 player,
+		Level:                  levelForXP(player.TotalXP),
+		Competencies:           assessments,
+		Achievements:           achievements,
+		LeaderboardPointsTotal: points,
 	}, nil
 }
 
@@ -95,27 +106,30 @@ func assessCompetencies(all []domain.Competency, earned []domain.PlayerCompetenc
 }
 
 type LeaderboardEntry struct {
-	Rank     int       `json:"rank"`
-	PlayerID uuid.UUID `json:"player_id"`
-	Username string    `json:"username"`
-	TotalXP  int       `json:"total_xp"`
+	Rank                   int       `json:"rank"`
+	PlayerID               uuid.UUID `json:"player_id"`
+	Username               string    `json:"username"`
+	LeaderboardPointsTotal int       `json:"leaderboard_points_total"`
 }
 
 func (s *ProfileService) Leaderboard(ctx context.Context, limit int) ([]LeaderboardEntry, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 10
 	}
-	players, err := s.store.Leaderboard(ctx, limit)
+	players, err := s.store.PointsLeaderboard(ctx, s.namespace, "company", "")
 	if err != nil {
 		return nil, err
 	}
-	out := make([]LeaderboardEntry, 0, len(players))
+	out := make([]LeaderboardEntry, 0, min(limit, len(players)))
 	for i, p := range players {
+		if i >= limit {
+			break
+		}
 		out = append(out, LeaderboardEntry{
-			Rank:     i + 1,
-			PlayerID: p.ID,
-			Username: p.Username,
-			TotalXP:  p.TotalXP,
+			Rank:                   pointsRank(players, i),
+			PlayerID:               p.PlayerID,
+			Username:               p.Username,
+			LeaderboardPointsTotal: p.Points,
 		})
 	}
 	return out, nil
@@ -143,25 +157,42 @@ func (s *ProfileService) ScopedLeaderboard(ctx context.Context, scope, groupID s
 	if limit <= 0 || limit > 100 {
 		limit = 10
 	}
-	players, err := s.store.LeaderboardScoped(ctx, scope, groupID, limit)
+	players, err := s.store.PointsLeaderboard(ctx, s.namespace, scope, groupID)
 	if err != nil {
 		return nil, err
 	}
 	groupSize := len(players)
-	entries := make([]ScopedLeaderboardEntry, 0, groupSize)
+	entries := make([]ScopedLeaderboardEntry, 0, min(limit, groupSize))
 	for i, p := range players {
-		rank := i + 1
+		if i >= limit {
+			break
+		}
+		rank := pointsRank(players, i)
 		percentile := 0.0
 		if groupSize > 0 {
-			percentile = math.Round((1-float64(rank-1)/float64(groupSize))*10000) / 100
+			equal := 0
+			for _, row := range players {
+				if row.Points == p.Points {
+					equal++
+				}
+			}
+			lower := groupSize - (rank - 1) - equal
+			percentile = math.Round((float64(lower)+0.5*float64(equal))/float64(groupSize)*10000) / 100
 		}
 		entries = append(entries, ScopedLeaderboardEntry{
 			Rank:                   rank,
-			PlayerID:               p.ID,
+			PlayerID:               p.PlayerID,
 			Username:               p.Username,
-			LeaderboardPointsTotal: p.TotalXP,
+			LeaderboardPointsTotal: p.Points,
 			Percentile:             percentile,
 		})
 	}
 	return &ScopedLeaderboard{GroupScope: scope, GroupID: groupID, GroupSize: groupSize, Entries: entries}, nil
+}
+
+func pointsRank(players []repo.PointsStanding, index int) int {
+	for index > 0 && players[index-1].Points == players[index].Points {
+		index--
+	}
+	return index + 1
 }

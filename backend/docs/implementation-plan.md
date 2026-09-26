@@ -16,7 +16,7 @@ describe behavior, compatibility, and verification.
 | 3 | Concurrent events, observation, and wagon zones | Two events can coexist; an indirect cue is discovered through an action; movement and interaction have server-controlled spatial/time costs. Complete for the demo template. |
 | 4 | Timers, causal log, and debrief | A server deadline changes event state once; the action/effect log explains every score change and an alternative; the whole session is scored from that log. Complete for the demo template. |
 | 5 | Achievements and notifications | At least two observable achievements, one challenge, and new-scenario/challenge notifications are persisted and issued idempotently. Complete for the demo flow. |
-| 6 | Competency points and leaderboard | Eligible results earn points in a namespace-specific ledger; group rank, size, and percentile use the full cohort; XP remains a separate progression metric. |
+| 6 | Competency points and leaderboard | Eligible results earn points in a namespace-specific ledger; group rank, size, and percentile use the full cohort; XP remains a separate progression metric. Complete with provisional demo coefficients. |
 | 7 | Integration and release checks | Tests cover branching, concurrency, timeout, replay, duplicate commands/awards, authorization, and API compatibility; docs and demo flow match the code. |
 
 Stage 1 is a prerequisite for a publicly reachable demo. Stages 2–4 form one

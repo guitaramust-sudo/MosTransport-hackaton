@@ -26,6 +26,7 @@ type SimulationRun struct {
 	TimedOut         bool                 `json:"timed_out"`
 	Passed           bool                 `json:"passed"`
 	SeedVariant      string               `json:"seed_variant"`
+	PointsNamespace  string               `json:"points_namespace"`
 	ActionLog        []SimulationLogEntry `json:"action_log"`
 	Flags            map[string]bool      `json:"flags"`
 	Loyalty          int                  `json:"loyalty"`

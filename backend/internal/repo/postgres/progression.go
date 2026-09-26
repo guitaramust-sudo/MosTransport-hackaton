@@ -52,6 +52,35 @@ func (s *Store) FinalizeSimulationRewards(ctx context.Context, run domain.Simula
 	if current.Status != "finished" {
 		return repo.ErrConflict
 	}
+	// Only passed, published content can earn official points. Demo points live
+	// in their own namespace and never inherit XP from legacy dialogue shifts.
+	var template struct {
+		ValidationStatus string `json:"validation_status"`
+	}
+	if err := json.Unmarshal(current.TemplateSnapshot, &template); err != nil {
+		return err
+	}
+	eligible := current.Passed && current.SeedVariant != "" &&
+		((current.PointsNamespace == "official" && template.ValidationStatus == "approved") ||
+			(current.PointsNamespace == "demo" && (template.ValidationStatus == "draft" || template.ValidationStatus == "approved")))
+	if eligible {
+		var existing int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM points_ledger WHERE player_id = $1 AND namespace = $2 AND scenario_family = $3`,
+			current.PlayerID, current.PointsNamespace, current.ScenarioID).Scan(&existing); err != nil {
+			return err
+		}
+		if existing < 2 {
+			points := 20
+			if existing == 1 {
+				points = 10
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO points_ledger (player_id, run_id, namespace, scenario_family, seed_variant, points_delta)
+				VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+				current.PlayerID, current.ID, current.PointsNamespace, current.ScenarioID, current.SeedVariant, points); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO achievements (player_id, code) VALUES ($1, 'first_complete') ON CONFLICT DO NOTHING`, run.PlayerID); err != nil {
 		return err
 	}
@@ -92,6 +121,18 @@ func (s *Store) FinalizeSimulationRewards(ctx context.Context, run domain.Simula
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) GetSimulationPoints(ctx context.Context, runID uuid.UUID, namespace string) (int, error) {
+	var points int
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(points_delta), 0) FROM points_ledger WHERE run_id = $1 AND namespace = $2`, runID, namespace).Scan(&points)
+	return points, err
+}
+
+func (s *Store) GetPlayerPointsTotal(ctx context.Context, playerID uuid.UUID, namespace string) (int, error) {
+	var points int
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(points_delta), 0) FROM points_ledger WHERE player_id = $1 AND namespace = $2`, playerID, namespace).Scan(&points)
+	return points, err
 }
 
 func (s *Store) ListNotifications(ctx context.Context, playerID uuid.UUID) ([]domain.Notification, error) {

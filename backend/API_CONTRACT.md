@@ -183,7 +183,7 @@
 ```json
 {
   "leaderboard": [
-    { "rank": 1, "player_id": "uuid", "username": "Иван", "total_xp": 420 }
+    { "rank": 1, "player_id": "uuid", "username": "Иван", "leaderboard_points_total": 20 }
   ]
 }
 ```
@@ -199,10 +199,15 @@
   "group_id": "depot-1",
   "group_size": 5,
   "entries": [
-    { "rank": 1, "player_id": "uuid", "username": "Иван", "leaderboard_points_total": 420, "percentile": 100 }
+    { "rank": 1, "player_id": "uuid", "username": "Иван", "leaderboard_points_total": 20, "percentile": 75 }
   ]
 }
 ```
+
+Рейтинг берёт очки из отдельного реестра своего `POINTS_NAMESPACE`, а не из
+`total_xp`. `group_size`, место и перцентиль считаются по всей группе до
+ограничения списка до 50 строк. При равенстве очков место одинаковое;
+перцентиль — доля участников ниже плюс половина участников с тем же счётом.
 
 ---
 
@@ -263,6 +268,14 @@
 демонстрационный (`validation_status=draft`) и не является профессиональной
 аттестацией.
 
+Результат также содержит `points_namespace`, `leaderboard_points_delta`,
+`leaderboard_points_total`, `leaderboard_eligible`. Зачтённое прохождение
+получает 20 очков за первый вариант семейства сценария и 10 за второй;
+повтор того же варианта, неудачная смена и timeout дают 0. Это временные
+демонстрационные коэффициенты, не утверждённая модель компетенций. Очки
+`demo` не попадают в `official`. Для официального начисления нужен `approved`
+сценарий. XP от челленджей не меняет рейтинг.
+
 ### POST `/api/session/start`
 
 Создаёт смену и **первую** ситуацию; остальные кладёт в `pending_situations`.
@@ -301,8 +314,8 @@
   "critical_violations": 0,
   "unresolved_commitments": 0,
   "competencies_xp": { "safety": 40, "service": 10 },
-  "leaderboard_points_delta": 120,
-  "leaderboard_points_total": 260,
+  "leaderboard_points_delta": 0,
+  "leaderboard_points_total": 0,
   "leaderboard_eligible": false,
   "situations": [
     {
@@ -328,9 +341,9 @@
 - `session_safety_score` — среднее финальных `safety` по ситуациям.
 - `world_safety_current` — в текущей модели равно `session_safety_score` (шкалы
   считаются при закрытии, живого состояния мира нет).
-- `leaderboard_points_delta` = `total_xp`; `leaderboard_points_total` — накопленный
-  `total_xp` игрока после начисления. `leaderboard_eligible` — `true` только при
-  `POINTS_NAMESPACE=official`.
+- Диалоговый API сохраняет XP, но пока не начисляет очки рейтинга:
+  `leaderboard_points_delta=0`, `leaderboard_eligible=false`;
+  `leaderboard_points_total` берётся из реестра симуляции в выбранном namespace.
 
 ---
 
@@ -549,7 +562,7 @@
 | Переменная | По умолчанию | Влияние |
 |---|---|---|
 | `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | — | используются только локальной командой `bootstrap-admin`; регистрация через API всегда создаёт `user` |
-| `POINTS_NAMESPACE` | `demo` | `leaderboard_eligible` (`true` только при `official`) |
+| `POINTS_NAMESPACE` | `demo` | изолирует рейтинг и допускает draft только для демонстрации; официальный рейтинг требует approved контент |
 | `SITUATIONS_PER_SESSION` | `4` | число ситуаций в смене |
 | `SITUATION_TIMEOUT` | — | (устарело, таймер берётся из сценария `time_limit_sec`) |
 

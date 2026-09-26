@@ -171,6 +171,41 @@ func (s *Store) queryLeaderboard(ctx context.Context, where string, args []any, 
 	return out, rows.Err()
 }
 
+// PointsLeaderboard returns the full cohort so rank and percentile can be
+// calculated before the API truncates the visible page.
+func (s *Store) PointsLeaderboard(ctx context.Context, namespace, scope, groupID string) ([]repo.PointsStanding, error) {
+	var where string
+	switch scope {
+	case "company":
+	case "depot":
+		where = `WHERE p.depot_id = $2`
+	case "brigade":
+		where = `WHERE p.brigade_id = $2`
+	default:
+		return nil, fmt.Errorf("unsupported leaderboard scope %q", scope)
+	}
+	args := []any{namespace}
+	if scope != "company" {
+		args = append(args, groupID)
+	}
+	rows, err := s.pool.Query(ctx, `SELECT p.id, p.username, COALESCE(SUM(l.points_delta), 0)::int AS points
+		FROM players p LEFT JOIN points_ledger l ON l.player_id = p.id AND l.namespace = $1 `+where+`
+		GROUP BY p.id, p.username, p.created_at ORDER BY points DESC, p.created_at ASC, p.id ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []repo.PointsStanding{}
+	for rows.Next() {
+		var item repo.PointsStanding
+		if err := rows.Scan(&item.PlayerID, &item.Username, &item.Points); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 // UpsertExternalUser creates or refreshes a profile linked to an external HR
 // system. It is idempotent by (source_system, external_user_id).
 func (s *Store) UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error) {
