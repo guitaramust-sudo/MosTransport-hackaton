@@ -31,17 +31,23 @@ type Store interface {
 	GetPlayerByEmail(ctx context.Context, email string) (domain.Player, error)
 	GetPlayerByID(ctx context.Context, id uuid.UUID) (domain.Player, error)
 	AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) error
-	AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp int) error
+	AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp, evidence int) error
 	ListCompetencies(ctx context.Context) ([]domain.Competency, error)
 	GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) ([]domain.PlayerCompetency, error)
 	Leaderboard(ctx context.Context, limit int) ([]domain.Player, error)
+	LeaderboardScoped(ctx context.Context, scope, groupID string, limit int) ([]domain.Player, error)
+	UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error)
+	GetPlayerByExternal(ctx context.Context, sourceSystem, externalUserID string) (domain.Player, error)
 
 	// Sessions
 	CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error)
-	CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, situations []domain.Situation) (domain.Session, []domain.Situation, error)
+	CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, pending []string, situations []domain.Situation) (domain.Session, []domain.Situation, error)
+	SpawnNextSituation(ctx context.Context, sessionID uuid.UUID, resolve func(scenarioID string) (domain.Situation, error)) (*domain.Situation, error)
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
 	FinishSession(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
 	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, finishedAt time.Time) (bool, error)
+	ApproveSession(ctx context.Context, id uuid.UUID) error
+	ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error)
 
 	// Refresh tokens
 	CreateRefreshToken(ctx context.Context, playerID uuid.UUID, tokenHash string, expiresAt time.Time) error
@@ -60,7 +66,7 @@ type Store interface {
 
 	// Messages
 	CreateMessage(ctx context.Context, situationID uuid.UUID, role, content string, category *string) (domain.Message, error)
-	AppendTurn(ctx context.Context, situationID, playerID uuid.UUID, text, reply string, targets []string) (int, error)
+	AppendTurn(ctx context.Context, situationID, playerID uuid.UUID, text, reply string, targets []string, inputMode *string) (int, error)
 	CreateEscalationMessage(ctx context.Context, situationID uuid.UUID, target string) error
 	ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error)
 	CountPlayerMessages(ctx context.Context, situationID uuid.UUID) (int, error)

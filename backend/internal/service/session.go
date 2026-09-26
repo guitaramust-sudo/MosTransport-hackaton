@@ -18,14 +18,15 @@ import (
 var ErrSessionNotFound = errors.New("session not found")
 
 type SessionService struct {
-	store         repo.Store
-	catalog       content.Catalog
-	situationsNum int
-	situations    *SituationService
+	store           repo.Store
+	catalog         content.Catalog
+	situationsNum   int
+	situations      *SituationService
+	pointsNamespace string
 }
 
-func NewSessionService(store repo.Store, catalog content.Catalog, situationsNum int, situations *SituationService) *SessionService {
-	return &SessionService{store: store, catalog: catalog, situationsNum: situationsNum, situations: situations}
+func NewSessionService(store repo.Store, catalog content.Catalog, situationsNum int, situations *SituationService, pointsNamespace string) *SessionService {
+	return &SessionService{store: store, catalog: catalog, situationsNum: situationsNum, situations: situations, pointsNamespace: pointsNamespace}
 }
 
 func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain.Session, []domain.Situation, error) {
@@ -33,39 +34,53 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 		return nil, nil, err
 	}
 	selected := pickScenarios(s.catalog.Scenarios, s.situationsNum)
-	drafts := make([]domain.Situation, 0, len(selected))
-	for _, scenario := range selected {
-		passenger := s.catalog.Passengers[rand.Intn(len(s.catalog.Passengers))]
-		deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
-		scenarioID, passengerID := scenario.ID, passenger.ID
-		params := map[string]any{
-			"code":             scenario.ID,
-			"name":             passenger.ID,
-			"persona":          passenger.PromptHint,
-			"scenario":         scenario.Title,
-			"opening":          scenario.Opening,
-			"situation_def_id": scenario.ID,
-			"passenger_id":     passenger.ID,
-			"prompt_hint":      passenger.PromptHint,
-			"language":         passenger.Language,
-			"traits":           passenger.Traits,
-			"traits_text":      strings.Join(passenger.Traits, ", "),
-		}
-		drafts = append(drafts, domain.Situation{
-			Status:          domain.SituationStatusActive,
-			SituationDefID:  &scenarioID,
-			PassengerID:     &passengerID,
-			PassengerParams: params,
-			Loyalty:         50,
-			Safety:          50,
-			TimerDeadline:   &deadline,
-		})
+
+	first := selected[0]
+	pending := make([]string, 0, len(selected)-1)
+	for _, scenario := range selected[1:] {
+		pending = append(pending, scenario.ID)
 	}
-	sess, situations, err := s.store.CreateSessionWithSituations(ctx, playerID, drafts)
+
+	draft := buildSituationDraft(first, pickPassenger(s.catalog))
+	sess, situations, err := s.store.CreateSessionWithSituations(ctx, playerID, pending, []domain.Situation{draft})
 	if err != nil {
 		return nil, nil, err
 	}
 	return &sess, situations, nil
+}
+
+// pickPassenger selects a random passenger for a situation.
+func pickPassenger(catalog content.Catalog) content.Passenger {
+	return catalog.Passengers[rand.Intn(len(catalog.Passengers))]
+}
+
+// buildSituationDraft turns a scenario and a passenger into a situation with a
+// fresh timer deadline.
+func buildSituationDraft(scenario content.Scenario, passenger content.Passenger) domain.Situation {
+	deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
+	scenarioID, passengerID := scenario.ID, passenger.ID
+	params := map[string]any{
+		"code":             scenario.ID,
+		"name":             passenger.ID,
+		"persona":          passenger.PromptHint,
+		"scenario":         scenario.Title,
+		"opening":          scenario.Opening,
+		"situation_def_id": scenario.ID,
+		"passenger_id":     passenger.ID,
+		"prompt_hint":      passenger.PromptHint,
+		"language":         passenger.Language,
+		"traits":           passenger.Traits,
+		"traits_text":      strings.Join(passenger.Traits, ", "),
+	}
+	return domain.Situation{
+		Status:          domain.SituationStatusActive,
+		SituationDefID:  &scenarioID,
+		PassengerID:     &passengerID,
+		PassengerParams: params,
+		Loyalty:         50,
+		Safety:          50,
+		TimerDeadline:   &deadline,
+	}
 }
 
 func pickScenarios(scenarios []content.Scenario, n int) []content.Scenario {
@@ -100,10 +115,23 @@ func (s *SessionService) Get(ctx context.Context, playerID, sessionID uuid.UUID)
 
 // Breakdown is the post-shift debrief returned to the player.
 type Breakdown struct {
-	SessionID    uuid.UUID            `json:"session_id"`
-	TotalXP      int                  `json:"total_xp"`
-	Competencies map[string]int       `json:"competencies_xp"` // code -> xp gained
-	Situations   []SituationBreakdown `json:"situations"`
+	SessionID              uuid.UUID            `json:"session_id"`
+	ScenarioVersion        string               `json:"scenario_version"`
+	ScoringRuleVersion     string               `json:"scoring_rule_version"`
+	ValidationStatus       string               `json:"validation_status"`
+	PointsNamespace        string               `json:"points_namespace"`
+	TotalXP                int                  `json:"total_xp"`
+	SessionPass            bool                 `json:"session_pass"`
+	WorldSafetyCurrent     int                  `json:"world_safety_current"`
+	SessionSafetyScore     int                  `json:"session_safety_score"`
+	Loyalty                int                  `json:"loyalty"`
+	CriticalViolations     int                  `json:"critical_violations"`
+	UnresolvedCommitments  int                  `json:"unresolved_commitments"`
+	Competencies           map[string]int       `json:"competencies_xp"` // code -> xp gained
+	LeaderboardPointsDelta int                  `json:"leaderboard_points_delta"`
+	LeaderboardPointsTotal int                  `json:"leaderboard_points_total"`
+	LeaderboardEligible    bool                 `json:"leaderboard_eligible"`
+	Situations             []SituationBreakdown `json:"situations"`
 }
 
 type SituationBreakdown struct {
@@ -150,12 +178,25 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 		if err != nil {
 			return nil, err
 		}
+		sess, err = s.store.GetSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	breakdown := &Breakdown{
-		SessionID:    sessionID,
-		Competencies: map[string]int{},
+		SessionID:          sessionID,
+		ScenarioVersion:    domain.ScenarioVersion,
+		ScoringRuleVersion: domain.ScoringRuleVersion,
+		ValidationStatus:   sess.ValidationStatus,
+		PointsNamespace:    s.pointsNamespace,
+		Competencies:       map[string]int{},
 	}
+
+	competencyXP := map[string]int{}
+	competencyEvidence := map[string]int{}
+	loyaltySum, safetySum := 0, 0
+	allResolved := true
 
 	for _, sit := range situations {
 		sb := SituationBreakdown{
@@ -176,13 +217,74 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 		sb.ScoreResult = sit.ScoreResult
 		breakdown.TotalXP += sb.XP
 		breakdown.Situations = append(breakdown.Situations, sb)
-	}
 
-	if wasActive {
-		if _, err := s.store.FinishSessionAndAwardXP(ctx, sessionID, playerID, breakdown.TotalXP, time.Now()); err != nil {
-			return nil, err
+		switch sb.Outcome {
+		case "fail":
+			breakdown.CriticalViolations++
+			allResolved = false
+		case "timeout":
+			breakdown.CriticalViolations++
+			allResolved = false
+		case "unfinished":
+			breakdown.UnresolvedCommitments++
+			allResolved = false
+		}
+
+		loyaltySum += sit.Loyalty
+		safetySum += sit.Safety
+
+		if code := s.competencyCodeFor(sit); code != "" && sb.Outcome != "unfinished" {
+			competencyXP[code] += sit.XP
+			competencyEvidence[code]++
+			breakdown.Competencies[code] += sit.XP
 		}
 	}
 
+	if n := len(situations); n > 0 {
+		breakdown.Loyalty = loyaltySum / n
+		breakdown.SessionSafetyScore = safetySum / n
+		breakdown.WorldSafetyCurrent = breakdown.SessionSafetyScore
+	} else {
+		breakdown.SessionSafetyScore = 100
+		breakdown.WorldSafetyCurrent = 100
+	}
+	breakdown.SessionPass = allResolved && len(situations) > 0
+	breakdown.LeaderboardPointsDelta = breakdown.TotalXP
+
+	if wasActive {
+		awarded, err := s.store.FinishSessionAndAwardXP(ctx, sessionID, playerID, breakdown.TotalXP, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if awarded {
+			for code, xp := range competencyXP {
+				if err := s.store.AddCompetencyXP(ctx, playerID, code, xp, competencyEvidence[code]); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	player, err := s.store.GetPlayerByID(ctx, playerID)
+	if err != nil {
+		return nil, err
+	}
+	breakdown.LeaderboardPointsTotal = player.TotalXP
+	breakdown.LeaderboardEligible = s.pointsNamespace == "official"
+
 	return breakdown, nil
+}
+
+// competencyCodeFor maps a situation back to the competency trained by its
+// scenario type (service, conflict, medical, safety, informational).
+func (s *SessionService) competencyCodeFor(sit domain.Situation) string {
+	if sit.SituationDefID == nil {
+		return ""
+	}
+	for _, scenario := range s.catalog.Scenarios {
+		if scenario.ID == *sit.SituationDefID {
+			return string(scenario.Type)
+		}
+	}
+	return ""
 }

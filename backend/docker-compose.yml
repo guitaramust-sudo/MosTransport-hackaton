@@ -26,6 +26,8 @@ services:
       APP_ENV: ${APP_ENV:-development}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-24h}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      POINTS_NAMESPACE: ${POINTS_NAMESPACE:-demo}
       LLM_MODE: ${LLM_MODE:-mock}
       GIGACHAT_CLIENT_ID: ${GIGACHAT_CLIENT_ID:-}
       GIGACHAT_CLIENT_SECRET: ${GIGACHAT_CLIENT_SECRET:-}

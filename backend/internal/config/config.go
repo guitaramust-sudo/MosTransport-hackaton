@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,8 @@ type Config struct {
 
 	LLMMode string // gigachat | mock
 
+	AdminEmails []string
+
 	GigaChatClientID     string
 	GigaChatClientSecret string
 	GigaChatAuthURL      string
@@ -28,6 +31,7 @@ type Config struct {
 	GigaChatInsecure     bool
 
 	SituationsPerSession int
+	PointsNamespace      string
 }
 
 func Load() *Config {
@@ -43,6 +47,8 @@ func Load() *Config {
 
 		LLMMode: env("LLM_MODE", "mock"),
 
+		AdminEmails: splitCSV(env("ADMIN_EMAILS", "")),
+
 		GigaChatClientID:     os.Getenv("GIGACHAT_CLIENT_ID"),
 		GigaChatClientSecret: os.Getenv("GIGACHAT_CLIENT_SECRET"),
 		GigaChatAuthURL:      env("GIGACHAT_AUTH_URL", "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"),
@@ -51,6 +57,7 @@ func Load() *Config {
 		GigaChatInsecure:     envBool("GIGACHAT_INSECURE", false),
 
 		SituationsPerSession: envInt("SITUATIONS_PER_SESSION", 4),
+		PointsNamespace:      env("POINTS_NAMESPACE", "demo"),
 	}
 }
 
@@ -101,4 +108,18 @@ func envBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+// splitCSV splits a comma-separated env value into trimmed, non-empty items.
+func splitCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }

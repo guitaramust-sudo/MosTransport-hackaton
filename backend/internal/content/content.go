@@ -40,6 +40,10 @@ const (
 type MustConvey struct {
 	ID   string `json:"id"`
 	Desc string `json:"desc"`
+	// EscalationTarget marks a point that is satisfied by escalating to the
+	// given address (e.g. "Сообщить начальнику поезда" is satisfied by calling
+	// train_chief). Empty means the point is independent of escalation.
+	EscalationTarget string `json:"escalation_target,omitempty"`
 }
 
 type Escalation struct {
@@ -135,6 +139,9 @@ func (c Catalog) Validate() error {
 				return fmt.Errorf("%s: empty or duplicate must_convey id/desc %q", where, p.ID)
 			}
 			pointIDs[p.ID] = true
+			if p.EscalationTarget != "" && !oneOf(p.EscalationTarget, TargetTrainChief, TargetPTB, TargetPolice, TargetMedic, TargetAmbulance) {
+				return fmt.Errorf("%s: invalid escalation_target %q", where, p.EscalationTarget)
+			}
 		}
 		targets := map[string]bool{}
 		for _, target := range s.CorrectCompletion.Escalation.To {
@@ -156,7 +163,7 @@ func (c Catalog) Validate() error {
 		passengerIDs[p.ID] = true
 		if !oneOf(p.Age, "child", "young", "middle", "elderly") ||
 			!oneOf(p.Tone, "calm", "anxious", "aggressive", "confused", "indifferent") ||
-			!oneOf(p.Language, "ru", "en", "zh", "de") {
+			!oneOf(p.Language, "ru", "en") {
 			return fmt.Errorf("%s: invalid age, tone or language", where)
 		}
 		if blank(p.PromptHint) {

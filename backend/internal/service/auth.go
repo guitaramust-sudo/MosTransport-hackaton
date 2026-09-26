@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -33,19 +34,34 @@ func isUniqueViolation(err error) bool {
 }
 
 type AuthService struct {
-	store      repo.Store
-	jwtSecret  []byte
-	accessTTL  time.Duration
-	refreshTTL time.Duration
+	store       repo.Store
+	jwtSecret   []byte
+	accessTTL   time.Duration
+	refreshTTL  time.Duration
+	adminEmails map[string]bool
 }
 
-func NewAuthService(store repo.Store, jwtSecret string, accessTTL, refreshTTL time.Duration) *AuthService {
-	return &AuthService{
-		store:      store,
-		jwtSecret:  []byte(jwtSecret),
-		accessTTL:  accessTTL,
-		refreshTTL: refreshTTL,
+func NewAuthService(store repo.Store, jwtSecret string, accessTTL, refreshTTL time.Duration, adminEmails []string) *AuthService {
+	admins := map[string]bool{}
+	for _, email := range adminEmails {
+		admins[strings.ToLower(strings.TrimSpace(email))] = true
 	}
+	return &AuthService{
+		store:       store,
+		jwtSecret:   []byte(jwtSecret),
+		accessTTL:   accessTTL,
+		refreshTTL:  refreshTTL,
+		adminEmails: admins,
+	}
+}
+
+// roleFor returns the role encoded into a player's token. Users listed in
+// ADMIN_EMAILS are granted the admin role.
+func (s *AuthService) roleFor(email string) string {
+	if s.adminEmails[strings.ToLower(strings.TrimSpace(email))] {
+		return domain.RoleAdmin
+	}
+	return domain.RoleUser
 }
 
 type TokenPair struct {
@@ -73,7 +89,9 @@ func (s *AuthService) Register(ctx context.Context, email, username, password st
 		return AuthResult{}, err
 	}
 
-	tokens, err := s.issueTokens(ctx, player.ID)
+	role := s.roleFor(email)
+	player.Role = role
+	tokens, err := s.issueTokens(ctx, player.ID, role)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -89,15 +107,17 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (AuthRe
 		return AuthResult{}, ErrInvalidCreds
 	}
 
-	tokens, err := s.issueTokens(ctx, player.ID)
+	role := s.roleFor(player.Email)
+	player.Role = role
+	tokens, err := s.issueTokens(ctx, player.ID, role)
 	if err != nil {
 		return AuthResult{}, err
 	}
 	return AuthResult{Player: player, Tokens: tokens}, nil
 }
 
-func (s *AuthService) issueTokens(ctx context.Context, playerID uuid.UUID) (TokenPair, error) {
-	access, err := s.signAccess(playerID)
+func (s *AuthService) issueTokens(ctx context.Context, playerID uuid.UUID, role string) (TokenPair, error) {
+	access, err := s.signAccess(playerID, role)
 	if err != nil {
 		return TokenPair{}, err
 	}
@@ -131,7 +151,9 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthRes
 	if err != nil {
 		return AuthResult{}, err
 	}
-	tokens, err := s.issueTokens(ctx, playerID)
+	role := s.roleFor(player.Email)
+	player.Role = role
+	tokens, err := s.issueTokens(ctx, playerID, role)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -145,13 +167,15 @@ func hashRefreshToken(token string) string {
 
 type claims struct {
 	PlayerID string `json:"player_id"`
+	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-func (s *AuthService) signAccess(playerID uuid.UUID) (string, error) {
+func (s *AuthService) signAccess(playerID uuid.UUID, role string) (string, error) {
 	now := time.Now()
 	c := claims{
 		PlayerID: playerID.String(),
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   playerID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -161,8 +185,8 @@ func (s *AuthService) signAccess(playerID uuid.UUID) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString(s.jwtSecret)
 }
 
-// ParseAccess validates an access token and returns the player id.
-func (s *AuthService) ParseAccess(tokenString string) (uuid.UUID, error) {
+// ParseAccess validates an access token and returns the player id and role.
+func (s *AuthService) ParseAccess(tokenString string) (uuid.UUID, string, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, ErrInvalidToken
@@ -170,15 +194,15 @@ func (s *AuthService) ParseAccess(tokenString string) (uuid.UUID, error) {
 		return s.jwtSecret, nil
 	})
 	if err != nil || !token.Valid {
-		return uuid.Nil, ErrInvalidToken
+		return uuid.Nil, "", ErrInvalidToken
 	}
 	c, ok := token.Claims.(*claims)
 	if !ok {
-		return uuid.Nil, ErrInvalidToken
+		return uuid.Nil, "", ErrInvalidToken
 	}
 	id, err := uuid.Parse(c.PlayerID)
 	if err != nil {
-		return uuid.Nil, ErrInvalidToken
+		return uuid.Nil, "", ErrInvalidToken
 	}
-	return id, nil
+	return id, c.Role, nil
 }

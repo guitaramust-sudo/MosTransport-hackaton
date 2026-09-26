@@ -67,7 +67,7 @@ func TestCreateSessionRollsBackPartialSituations(t *testing.T) {
 	first := draftSituation(time.Now().Add(time.Minute))
 	second := draftSituation(time.Now().Add(time.Minute))
 	second.PassengerParams = map[string]any{"bad": make(chan int)}
-	if _, _, err := store.CreateSessionWithSituations(ctx, playerID, []domain.Situation{first, second}); err == nil {
+	if _, _, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{first, second}); err == nil {
 		t.Fatal("expected invalid JSON to abort session creation")
 	}
 	var count int
@@ -82,7 +82,7 @@ func TestCreateSessionRollsBackPartialSituations(t *testing.T) {
 func TestAppendTurnAndEscalationAreAtomic(t *testing.T) {
 	store, playerID := integrationStore(t)
 	ctx := context.Background()
-	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
+	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestAppendTurnAndEscalationAreAtomic(t *testing.T) {
 		t.Fatalf("unexpected created shift: %+v, %+v", sess, situations)
 	}
 	id := situations[0].ID
-	turnCount, err := store.AppendTurn(ctx, id, playerID, "Вызову врача", "Хорошо", []string{"medic"})
+	turnCount, err := store.AppendTurn(ctx, id, playerID, "Вызову врача", "Хорошо", []string{"medic"}, nil)
 	if err != nil || turnCount != 1 {
 		t.Fatalf("AppendTurn = %d, %v", turnCount, err)
 	}
@@ -101,7 +101,7 @@ func TestAppendTurnAndEscalationAreAtomic(t *testing.T) {
 	if _, err := store.pool.Exec(ctx, `UPDATE situations SET timer_deadline = now() - interval '1 second' WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AppendTurn(ctx, id, playerID, "Поздно", "Ответ", nil); !errors.Is(err, repo.ErrDeadlineExceeded) {
+	if _, err := store.AppendTurn(ctx, id, playerID, "Поздно", "Ответ", nil, nil); !errors.Is(err, repo.ErrDeadlineExceeded) {
 		t.Fatalf("expired AppendTurn error = %v", err)
 	}
 	messages, err := store.ListMessagesBySituation(ctx, id)
@@ -116,7 +116,7 @@ func TestAppendTurnAndEscalationAreAtomic(t *testing.T) {
 func TestLockedCloseRejectsConcurrentTurn(t *testing.T) {
 	store, playerID := integrationStore(t)
 	ctx := context.Background()
-	_, situations, err := store.CreateSessionWithSituations(ctx, playerID, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
+	_, situations, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestLockedCloseRejectsConcurrentTurn(t *testing.T) {
 	<-locked
 	turnErr := make(chan error, 1)
 	go func() {
-		_, err := store.AppendTurn(ctx, id, playerID, "Поздняя реплика", "Ответ", nil)
+		_, err := store.AppendTurn(ctx, id, playerID, "Поздняя реплика", "Ответ", nil, nil)
 		turnErr <- err
 	}()
 	select {

@@ -13,9 +13,9 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
-// CreateSessionWithSituations commits the shift, all situations and their
-// opening messages together. A failure leaves no partial shift behind.
-func (s *Store) CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, drafts []domain.Situation) (domain.Session, []domain.Situation, error) {
+// CreateSessionWithSituations commits the shift, the pending situation queue
+// and the initial situations together. A failure leaves no partial shift behind.
+func (s *Store) CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, pending []string, drafts []domain.Situation) (domain.Session, []domain.Situation, error) {
 	if len(drafts) == 0 {
 		return domain.Session{}, nil, fmt.Errorf("session requires situations")
 	}
@@ -26,9 +26,9 @@ func (s *Store) CreateSessionWithSituations(ctx context.Context, playerID uuid.U
 	defer tx.Rollback(ctx)
 	var sess domain.Session
 	err = tx.QueryRow(ctx,
-		`INSERT INTO sessions (player_id) VALUES ($1)
-		 RETURNING id, player_id, status, created_at, finished_at`, playerID,
-	).Scan(&sess.ID, &sess.PlayerID, &sess.Status, &sess.CreatedAt, &sess.FinishedAt)
+		`INSERT INTO sessions (player_id, pending_situations) VALUES ($1, $2)
+		 RETURNING `+sessionColumns, playerID, pending,
+	).Scan(scanSession(&sess)...)
 	if err != nil {
 		return domain.Session{}, nil, err
 	}
@@ -59,7 +59,7 @@ func (s *Store) CreateSessionWithSituations(ctx context.Context, playerID uuid.U
 
 // AppendTurn checks the session and deadline under row locks, then writes both
 // dialog messages and any text-detected escalation in one transaction.
-func (s *Store) AppendTurn(ctx context.Context, situationID, playerID uuid.UUID, text, reply string, targets []string) (int, error) {
+func (s *Store) AppendTurn(ctx context.Context, situationID, playerID uuid.UUID, text, reply string, targets []string, inputMode *string) (int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -86,7 +86,7 @@ func (s *Store) AppendTurn(ctx context.Context, situationID, playerID uuid.UUID,
 		return 0, repo.ErrDeadlineExceeded
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO messages (situation_id, role, content) VALUES ($1, 'player', $2)`, situationID, text); err != nil {
+		`INSERT INTO messages (situation_id, role, content, input_mode) VALUES ($1, 'player', $2, $3)`, situationID, text, inputMode); err != nil {
 		return 0, err
 	}
 	for _, target := range targets {
@@ -158,6 +158,70 @@ func (s *Store) RecordEscalation(ctx context.Context, situationID, playerID uuid
 		return nil, err
 	}
 	return actual, nil
+}
+
+// SpawnNextSituation atomically pops the next pending scenario and creates its
+// situation, provided the session is still active and no other situation is
+// running. It returns nil when there is nothing left to spawn.
+func (s *Store) SpawnNextSituation(ctx context.Context, sessionID uuid.UUID, resolve func(scenarioID string) (domain.Situation, error)) (*domain.Situation, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var status string
+	var pending []string
+	var active int
+	err = tx.QueryRow(ctx,
+		`SELECT status, pending_situations,
+		        (SELECT COUNT(*) FROM situations WHERE session_id = $1 AND status = 'active')
+		 FROM sessions WHERE id = $1 FOR UPDATE`, sessionID,
+	).Scan(&status, &pending, &active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repo.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if status != domain.SessionStatusActive || active > 0 || len(pending) == 0 {
+		return nil, nil
+	}
+
+	scenarioID := pending[0]
+	pending = pending[1:]
+
+	draft, err := resolve(scenarioID)
+	if err != nil {
+		return nil, err
+	}
+	draft.SessionID = sessionID
+
+	err = tx.QueryRow(ctx,
+		`INSERT INTO situations (session_id, status, passenger_params, loyalty, safety, timer_deadline, situation_def_id, passenger_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING `+situationColumns,
+		draft.SessionID, draft.Status, draft.PassengerParams, draft.Loyalty, draft.Safety,
+		draft.TimerDeadline, draft.SituationDefID, draft.PassengerID,
+	).Scan(situationScan(&draft)...)
+	if err != nil {
+		return nil, err
+	}
+
+	opening, _ := draft.PassengerParams["opening"].(string)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO messages (situation_id, role, content) VALUES ($1, 'system', $2)`, draft.ID, opening); err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET pending_situations = $2 WHERE id = $1`, sessionID, pending); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &draft, nil
 }
 
 func stringIn(items []string, target string) bool {

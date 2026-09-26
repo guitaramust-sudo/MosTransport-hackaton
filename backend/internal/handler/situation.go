@@ -36,7 +36,8 @@ func (h *Handlers) GetSituation(w http.ResponseWriter, r *http.Request) {
 }
 
 type messageRequest struct {
-	Text string `json:"text"`
+	Text      string  `json:"text"`
+	InputMode *string `json:"input_mode"` // "text" | "voice"
 }
 
 func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
@@ -52,8 +53,12 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "text required")
 		return
 	}
+	if req.InputMode != nil && *req.InputMode != "text" && *req.InputMode != "voice" {
+		writeError(w, http.StatusBadRequest, "input_mode must be text or voice")
+		return
+	}
 
-	result, err := h.Situation.SendMessage(r.Context(), playerID, id, req.Text)
+	result, err := h.Situation.SendMessage(r.Context(), playerID, id, req.Text, req.InputMode)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrSituationNotFound):

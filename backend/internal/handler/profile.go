@@ -28,3 +28,17 @@ func (h *Handlers) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"leaderboard": entries})
 }
+
+func (h *Handlers) GetScopedLeaderboard(w http.ResponseWriter, r *http.Request) {
+	scope := r.URL.Query().Get("scope")
+	groupID := r.URL.Query().Get("group_id")
+	if scope == "" {
+		scope = "company"
+	}
+	board, err := h.Profile.ScopedLeaderboard(r.Context(), scope, groupID, 50)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, board)
+}

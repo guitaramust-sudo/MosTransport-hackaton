@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -63,13 +62,14 @@ func run() error {
 		return fmt.Errorf("unsupported LLM_MODE %q", cfg.LLMMode)
 	}
 
-	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.AdminEmails)
 	situations := service.NewSituationService(store, client, catalog)
 	h := &handler.Handlers{
 		Auth:      auth,
 		Profile:   service.NewProfileService(store),
-		Session:   service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations),
+		Session:   service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation: situations,
+		Admin:     service.NewAdminService(store),
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -138,6 +138,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Use(appmiddleware.JWTAuth(auth))
 		r.Get("/profile", h.GetProfile)
 		r.Get("/leaderboard", h.GetLeaderboard)
+		r.Get("/leaderboards", h.GetScopedLeaderboard)
 		r.Post("/session/start", h.StartSession)
 		r.Get("/session/{id}", h.GetSession)
 		r.Post("/session/{id}/finish", h.FinishSession)
@@ -145,6 +146,12 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/situation/{id}/message", h.SendMessage)
 		r.Post("/situation/{id}/escalate", h.Escalate)
 		r.Post("/situation/{id}/finish", h.FinishSituation)
+	})
+	r.Route("/admin", func(r chi.Router) {
+		r.Use(appmiddleware.AdminAuth(auth))
+		r.Post("/users", h.CreateExternalUser)
+		r.Get("/users/{id}/learning-summary", h.LearningSummary)
+		r.Post("/sessions/{id}/approve", h.ApproveSession)
 	})
 	return r
 }
@@ -160,28 +167,16 @@ func requestLogger(next http.Handler) http.Handler {
 	})
 }
 
-// Expo web uses a separate localhost port during local development. Explicit
-// CORS_ORIGINS can override this list for other deployments.
+// localWebCORS allows any origin. Bearer-token auth is used, so wildcard CORS
+// is fine for local development and demos.
 func localWebCORS(next http.Handler) http.Handler {
-	allowed := os.Getenv("CORS_ORIGINS")
-	if allowed == "" {
-		allowed = "http://localhost:8081,http://localhost:19006,http://127.0.0.1:8081,http://127.0.0.1:19006"
-	}
-	origins := map[string]bool{}
-	for _, origin := range strings.Split(allowed, ",") {
-		origins[strings.TrimSpace(origin)] = true
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origins[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -8,13 +8,25 @@ import (
 )
 
 type Player struct {
-	ID           uuid.UUID `json:"id"`
-	Email        string    `json:"email"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	TotalXP      int       `json:"total_xp"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID               uuid.UUID  `json:"id"`
+	Email            string     `json:"email"`
+	Username         string     `json:"username"`
+	PasswordHash     string     `json:"-"`
+	Role             string     `json:"role"`
+	DisplayName      *string    `json:"display_name,omitempty"`
+	SourceSystem     *string    `json:"source_system,omitempty"`
+	ExternalUserID   *string    `json:"external_user_id,omitempty"`
+	AssignedClassIDs []string   `json:"assigned_class_ids,omitempty"`
+	DepotID          *string    `json:"depot_id,omitempty"`
+	BrigadeID        *string    `json:"brigade_id,omitempty"`
+	TotalXP          int        `json:"total_xp"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
+
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
 
 type Competency struct {
 	ID   int    `json:"id"`
@@ -23,9 +35,10 @@ type Competency struct {
 }
 
 type PlayerCompetency struct {
-	PlayerID     uuid.UUID `json:"player_id"`
-	CompetencyID int       `json:"competency_id"`
-	XP           int       `json:"xp"`
+	PlayerID      uuid.UUID `json:"player_id"`
+	CompetencyID  int       `json:"competency_id"`
+	XP            int       `json:"xp"`
+	EvidenceCount int       `json:"evidence_count"`
 }
 
 const (
@@ -34,11 +47,13 @@ const (
 )
 
 type Session struct {
-	ID         uuid.UUID  `json:"id"`
-	PlayerID   uuid.UUID  `json:"player_id"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	FinishedAt *time.Time `json:"finished_at"`
+	ID                uuid.UUID  `json:"id"`
+	PlayerID          uuid.UUID  `json:"player_id"`
+	Status            string     `json:"status"`
+	PendingSituations []string   `json:"pending_situations,omitempty"`
+	ValidationStatus  string     `json:"validation_status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
 }
 
 const (
@@ -71,6 +86,7 @@ type Message struct {
 	Role        string    `json:"role"`
 	Content     string    `json:"content"`
 	Category    *string   `json:"category,omitempty"`
+	InputMode   *string   `json:"input_mode,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -86,4 +102,28 @@ type SituationOutcome struct {
 	Loyalty int    `json:"loyalty"`
 	Safety  int    `json:"safety"`
 	XP      int    `json:"xp"`
+}
+
+const (
+	ScenarioVersion    = "1.0.0"
+	ScoringRuleVersion = "points-v1"
+
+	ValidationDraft    = "draft"
+	ValidationApproved = "approved"
+
+	CompetencyInsufficient = "insufficient"
+	CompetencyProvisional  = "provisional"
+	CompetencyAssessed     = "assessed"
+)
+
+// CompetencyAssessment is a read-model view of a player's skill in one
+// competency, used by profile and HR learning summaries.
+type CompetencyAssessment struct {
+	CompetencyID  int    `json:"competency_id"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Score         *int   `json:"score"`      // accumulated XP; null when no evidence
+	Confidence    int    `json:"confidence"` // number of contributing situations
+	Status        string `json:"status"`     // insufficient | provisional | assessed
+	EvidenceCount int    `json:"evidence_count"`
 }

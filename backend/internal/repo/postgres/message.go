@@ -8,14 +8,20 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/domain"
 )
 
+const messageColumns = `id, situation_id, role, content, category, input_mode, created_at`
+
+func scanMessage(m *domain.Message) []any {
+	return []any{&m.ID, &m.SituationID, &m.Role, &m.Content, &m.Category, &m.InputMode, &m.CreatedAt}
+}
+
 func (s *Store) CreateMessage(ctx context.Context, situationID uuid.UUID, role, content string, category *string) (domain.Message, error) {
 	var m domain.Message
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO messages (situation_id, role, content, category)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, situation_id, role, content, category, created_at`,
+		 RETURNING `+messageColumns,
 		situationID, role, content, category,
-	).Scan(&m.ID, &m.SituationID, &m.Role, &m.Content, &m.Category, &m.CreatedAt)
+	).Scan(scanMessage(&m)...)
 	return m, err
 }
 
@@ -28,8 +34,7 @@ func (s *Store) CreateEscalationMessage(ctx context.Context, situationID uuid.UU
 
 func (s *Store) ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, situation_id, role, content, category, created_at
-		 FROM messages WHERE situation_id = $1 ORDER BY id`, situationID)
+		`SELECT `+messageColumns+` FROM messages WHERE situation_id = $1 ORDER BY id`, situationID)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +43,7 @@ func (s *Store) ListMessagesBySituation(ctx context.Context, situationID uuid.UU
 	var out []domain.Message
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.SituationID, &m.Role, &m.Content, &m.Category, &m.CreatedAt); err != nil {
+		if err := rows.Scan(scanMessage(&m)...); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

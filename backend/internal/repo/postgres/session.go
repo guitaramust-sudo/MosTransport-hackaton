@@ -12,21 +12,26 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
+const sessionColumns = `id, player_id, status, pending_situations, validation_status, created_at, finished_at`
+
+func scanSession(sess *domain.Session) []any {
+	return []any{&sess.ID, &sess.PlayerID, &sess.Status, &sess.PendingSituations, &sess.ValidationStatus, &sess.CreatedAt, &sess.FinishedAt}
+}
+
 func (s *Store) CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error) {
 	var sess domain.Session
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO sessions (player_id) VALUES ($1)
-		 RETURNING id, player_id, status, created_at, finished_at`,
+		`INSERT INTO sessions (player_id) VALUES ($1) RETURNING `+sessionColumns,
 		playerID,
-	).Scan(&sess.ID, &sess.PlayerID, &sess.Status, &sess.CreatedAt, &sess.FinishedAt)
+	).Scan(scanSession(&sess)...)
 	return sess, err
 }
 
 func (s *Store) GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error) {
 	var sess domain.Session
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, player_id, status, created_at, finished_at FROM sessions WHERE id = $1`, id,
-	).Scan(&sess.ID, &sess.PlayerID, &sess.Status, &sess.CreatedAt, &sess.FinishedAt)
+		`SELECT `+sessionColumns+` FROM sessions WHERE id = $1`, id,
+	).Scan(scanSession(&sess)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sess, repo.ErrNotFound
 	}
@@ -60,6 +65,30 @@ func (s *Store) FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func (s *Store) ApproveSession(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE sessions SET validation_status = 'approved' WHERE id = $1`, id)
+	return err
+}
+
+func (s *Store) ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+sessionColumns+` FROM sessions WHERE player_id = $1 ORDER BY created_at DESC`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Session
+	for rows.Next() {
+		var sess domain.Session
+		if err := rows.Scan(scanSession(&sess)...); err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) CreateSituation(ctx context.Context, sit domain.Situation) (domain.Situation, error) {
