@@ -19,6 +19,9 @@ func (s *Store) CreateSessionWithSituations(ctx context.Context, playerID uuid.U
 	if len(drafts) == 0 {
 		return domain.Session{}, nil, fmt.Errorf("session requires situations")
 	}
+	if pending == nil {
+		pending = []string{}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return domain.Session{}, nil, err
@@ -172,16 +175,19 @@ func (s *Store) SpawnNextSituation(ctx context.Context, sessionID uuid.UUID, res
 
 	var status string
 	var pending []string
-	var active int
 	err = tx.QueryRow(ctx,
-		`SELECT status, pending_situations,
-		        (SELECT COUNT(*) FROM situations WHERE session_id = $1 AND status = 'active')
-		 FROM sessions WHERE id = $1 FOR UPDATE`, sessionID,
-	).Scan(&status, &pending, &active)
+		`SELECT status, pending_situations FROM sessions WHERE id = $1 FOR UPDATE`, sessionID,
+	).Scan(&status, &pending)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repo.ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	var active int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM situations WHERE session_id = $1 AND status = 'active'`, sessionID,
+	).Scan(&active); err != nil {
 		return nil, err
 	}
 	if status != domain.SessionStatusActive || active > 0 || len(pending) == 0 {

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,26 +52,93 @@ func (s *Store) FinishSession(ctx context.Context, id uuid.UUID, finishedAt time
 	return nil
 }
 
-func (s *Store) FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, finishedAt time.Time) (bool, error) {
-	var awardedID uuid.UUID
-	err := s.pool.QueryRow(ctx,
-		`WITH finished AS (
-		 UPDATE sessions SET status = 'finished', finished_at = $3
-		 WHERE id = $1 AND player_id = $2 AND status = 'active' RETURNING player_id
-		)
-		UPDATE players SET total_xp = total_xp + $4
-		WHERE id = $2 AND EXISTS (SELECT 1 FROM finished WHERE player_id = $2)
-		RETURNING id`, sessionID, playerID, finishedAt, xp).Scan(&awardedID)
+func (s *Store) FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, awards map[string]repo.CompetencyAward, expectedSituations, expectedPending int, finishedAt time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	var pending []string
+	err = tx.QueryRow(ctx,
+		`SELECT status, pending_situations FROM sessions WHERE id = $1 AND player_id = $2 FOR UPDATE`, sessionID, playerID).Scan(&status, &pending)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, repo.ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if status != domain.SessionStatusActive {
+		return false, nil
+	}
+	if len(pending) != expectedPending {
+		return false, repo.ErrConflict
+	}
+	var activeCount, situationCount int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active') FROM situations WHERE session_id = $1`, sessionID,
+	).Scan(&situationCount, &activeCount); err != nil {
+		return false, err
+	}
+	if activeCount > 0 || situationCount != expectedSituations {
+		return false, repo.ErrConflict
+	}
+	var finishedID uuid.UUID
+	err = tx.QueryRow(ctx,
+		`UPDATE sessions SET status = 'finished', finished_at = $3
+		 WHERE id = $1 AND player_id = $2 AND status = 'active'
+		 RETURNING id`, sessionID, playerID, finishedAt).Scan(&finishedID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	result, err := tx.Exec(ctx, `UPDATE players SET total_xp = total_xp + $2 WHERE id = $1`, playerID, xp)
+	if err != nil {
+		return false, err
+	}
+	if result.RowsAffected() != 1 {
+		return false, repo.ErrNotFound
+	}
+	for code, award := range awards {
+		result, err := tx.Exec(ctx,
+			`INSERT INTO player_competencies (player_id, competency_id, xp, evidence_count)
+			 SELECT $1, id, $3, $4 FROM competencies WHERE code = $2
+			 ON CONFLICT (player_id, competency_id)
+			 DO UPDATE SET xp = player_competencies.xp + EXCLUDED.xp,
+			               evidence_count = player_competencies.evidence_count + EXCLUDED.evidence_count`,
+			playerID, code, award.XP, award.Evidence)
+		if err != nil {
+			return false, err
+		}
+		if result.RowsAffected() != 1 {
+			return false, fmt.Errorf("unknown competency %q", code)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) ApproveSession(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE sessions SET validation_status = 'approved' WHERE id = $1`, id)
-	return err
+	var approvedID uuid.UUID
+	err := s.pool.QueryRow(ctx,
+		`UPDATE sessions SET validation_status = 'approved'
+		 WHERE id = $1 AND status = 'finished' RETURNING id`, id).Scan(&approvedID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	var status string
+	err = s.pool.QueryRow(ctx, `SELECT status FROM sessions WHERE id = $1`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return repo.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	return repo.ErrConflict
 }
 
 func (s *Store) ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error) {

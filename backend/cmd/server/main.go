@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -69,7 +70,7 @@ func run() error {
 		Profile:   service.NewProfileService(store),
 		Session:   service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation: situations,
-		Admin:     service.NewAdminService(store),
+		Admin:     service.NewAdminService(store, catalog),
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -167,15 +168,29 @@ func requestLogger(next http.Handler) http.Handler {
 	})
 }
 
-// localWebCORS allows any origin. Bearer-token auth is used, so wildcard CORS
-// is fine for local development and demos.
+// localWebCORS permits only configured browser origins.
 func localWebCORS(next http.Handler) http.Handler {
+	allowed := os.Getenv("CORS_ORIGINS")
+	if allowed == "" {
+		allowed = "http://localhost:8081,http://localhost:19006,http://127.0.0.1:8081,http://127.0.0.1:19006"
+	}
+	origins := map[string]bool{}
+	for _, origin := range strings.Split(allowed, ",") {
+		origins[strings.TrimSpace(origin)] = true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		origin := r.Header.Get("Origin")
+		if origins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		} else if r.Method == http.MethodOptions && origin != "" {
+			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)

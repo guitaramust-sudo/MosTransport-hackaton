@@ -61,6 +61,148 @@ func TestRefreshTokenCanOnlyBeConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestFinishAwardsXPAndCompetenciesAtomically(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 12, nil, 1, 0, time.Now()); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("active situation should prevent finishing: %v", err)
+	}
+	closeTestSituation(t, store, situations[0])
+	if _, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 12, nil, 1, 1, time.Now()); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("stale pending count should prevent finishing: %v", err)
+	}
+	if _, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 12,
+		map[string]repo.CompetencyAward{"unknown-code": {XP: 12, Evidence: 1}}, 1, 0, time.Now()); err == nil {
+		t.Fatal("unknown competency should roll back session and XP")
+	}
+	sess, err = store.GetSession(ctx, sess.ID)
+	if err != nil || sess.Status != domain.SessionStatusActive {
+		t.Fatalf("session after rollback: %+v, %v", sess, err)
+	}
+	player, err := store.GetPlayerByID(ctx, playerID)
+	if err != nil || player.TotalXP != 0 {
+		t.Fatalf("XP after rollback: %+v, %v", player, err)
+	}
+	awards := map[string]repo.CompetencyAward{"service": {XP: 12, Evidence: 1}}
+	awarded, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 12, awards, 1, 0, time.Now())
+	if err != nil || !awarded {
+		t.Fatalf("first award: %v, %v", awarded, err)
+	}
+	awarded, err = store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 12, awards, 1, 0, time.Now())
+	if err != nil || awarded {
+		t.Fatalf("duplicate award: %v, %v", awarded, err)
+	}
+	player, err = store.GetPlayerByID(ctx, playerID)
+	if err != nil || player.TotalXP != 12 {
+		t.Fatalf("final XP: %+v, %v", player, err)
+	}
+	competencies, err := store.GetPlayerCompetencies(ctx, playerID)
+	if err != nil || len(competencies) != 1 || competencies[0].XP != 12 || competencies[0].EvidenceCount != 1 {
+		t.Fatalf("final competencies: %+v, %v", competencies, err)
+	}
+}
+
+func TestConcurrentSpawnCreatesOnlyOneSituation(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, []string{"next"}, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestSituation(t, store, situations[0])
+	results := make(chan *domain.Situation, 2)
+	errorsCh := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			sit, err := store.SpawnNextSituation(ctx, sess.ID, func(id string) (domain.Situation, error) {
+				if id != "next" {
+					return domain.Situation{}, fmt.Errorf("unexpected scenario %q", id)
+				}
+				return draftSituation(time.Now().Add(time.Minute)), nil
+			})
+			results <- sit
+			errorsCh <- err
+		}()
+	}
+	spawned := 0
+	for i := 0; i < 2; i++ {
+		if err := <-errorsCh; err != nil {
+			t.Fatal(err)
+		}
+		if <-results != nil {
+			spawned++
+		}
+	}
+	if spawned != 1 {
+		t.Fatalf("spawned %d situations, want 1", spawned)
+	}
+	all, err := store.ListSituationsBySession(ctx, sess.ID)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("situations = %d, %v", len(all), err)
+	}
+}
+
+func TestApproveRequiresFinishedSession(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveSession(ctx, sess.ID); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("active approval: %v", err)
+	}
+	closeTestSituation(t, store, situations[0])
+	if _, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 0, nil, 1, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveSession(ctx, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveSession(ctx, uuid.New()); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("missing approval: %v", err)
+	}
+}
+
+func closeTestSituation(t *testing.T, store *Store, sit domain.Situation) {
+	t.Helper()
+	outcome := "success"
+	sit.Outcome = &outcome
+	closed, err := store.CloseSituation(context.Background(), sit)
+	if err != nil || !closed {
+		t.Fatalf("close test situation: %v, %v", closed, err)
+	}
+}
+
+func TestExternalUserAcceptsEmptyClasses(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	store, err := New(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	externalID := uuid.NewString()
+	player, created, err := store.UpsertExternalUser(ctx, "test", externalID, nil, nil, nil, nil)
+	if err != nil || !created {
+		t.Fatalf("create external: %+v, %v, %v", player, created, err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.pool.Exec(context.Background(), `DELETE FROM players WHERE id = $1`, player.ID)
+		store.Close()
+	})
+	_, created, err = store.UpsertExternalUser(ctx, "test", externalID, nil, nil, nil, nil)
+	if err != nil || created {
+		t.Fatalf("idempotent external: %v, %v", created, err)
+	}
+}
+
 func TestCreateSessionRollsBackPartialSituations(t *testing.T) {
 	store, playerID := integrationStore(t)
 	ctx := context.Background()

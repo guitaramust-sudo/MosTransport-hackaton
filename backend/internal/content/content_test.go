@@ -14,8 +14,8 @@ func TestEmbeddedCatalog(t *testing.T) {
 	if got := len(c.Scenarios); got != 50 {
 		t.Fatalf("scenario count = %d, want 50", got)
 	}
-	if got := len(c.Passengers); got != 44 {
-		t.Fatalf("passenger count = %d, want 44", got)
+	if got := len(c.Passengers); got != 50 {
+		t.Fatalf("passenger count = %d, want 50", got)
 	}
 	for _, p := range c.Passengers {
 		if p.Language != "ru" && p.Language != "en" {

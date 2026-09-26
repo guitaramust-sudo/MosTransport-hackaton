@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mostransport/vsm-trainer/internal/repo"
 	"github.com/mostransport/vsm-trainer/internal/service"
 )
 
@@ -37,6 +38,14 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Admin.ApproveSession(r.Context(), id); err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		if errors.Is(err, repo.ErrConflict) {
+			writeError(w, http.StatusConflict, "session is not finished")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

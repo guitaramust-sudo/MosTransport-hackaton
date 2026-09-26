@@ -11,6 +11,7 @@ import (
 
 	"github.com/mostransport/vsm-trainer/internal/domain"
 	"github.com/mostransport/vsm-trainer/internal/middleware"
+	"github.com/mostransport/vsm-trainer/internal/repo"
 	"github.com/mostransport/vsm-trainer/internal/service"
 )
 
@@ -131,6 +132,10 @@ func (h *Handlers) FinishSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, service.ErrSessionNotFound) {
 			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		if errors.Is(err, repo.ErrConflict) {
+			writeError(w, http.StatusConflict, "session changed; retry")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal error")

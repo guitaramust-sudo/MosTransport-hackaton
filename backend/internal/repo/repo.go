@@ -15,6 +15,11 @@ var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("state conflict")
 var ErrDeadlineExceeded = errors.New("situation deadline exceeded")
 
+type CompetencyAward struct {
+	XP       int
+	Evidence int
+}
+
 // LockedSituation is a transaction-scoped view used while closing a situation.
 // The row lock freezes the dialog and escalations until scoring is saved.
 type LockedSituation interface {
@@ -45,7 +50,7 @@ type Store interface {
 	SpawnNextSituation(ctx context.Context, sessionID uuid.UUID, resolve func(scenarioID string) (domain.Situation, error)) (*domain.Situation, error)
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
 	FinishSession(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
-	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, finishedAt time.Time) (bool, error)
+	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, awards map[string]CompetencyAward, expectedSituations, expectedPending int, finishedAt time.Time) (bool, error)
 	ApproveSession(ctx context.Context, id uuid.UUID) error
 	ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error)
 

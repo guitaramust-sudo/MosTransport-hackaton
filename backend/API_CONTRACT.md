@@ -361,11 +361,13 @@
 ```
 
 `created=false`, если сотрудник уже был заведён (запись обновлена).
+Отсутствующий `assigned_class_ids` сохраняется как пустой массив.
 
 ### GET `/admin/users/{id}/learning-summary`
 
 ```json
 {
+  "data_status": "available",
   "subject": {
     "user_id": "uuid",
     "source_system": "hr",
@@ -407,12 +409,17 @@
 }
 ```
 
-В `session_outcomes` учитываются **только approved**-сессии; draft-сессии попадают
-в `provenance.excluded_draft_count`.
+В `session_outcomes` и `competencies` учитываются **только завершённые approved**-сессии;
+остальные попадают в `provenance.excluded_draft_count`. Если утверждённых
+сессий нет, `data_status` равен `no_approved_data`, а оценки компетенций
+не содержат evidence.
+Неотыгранные `pending_situations` учитываются в `unresolved_commitments` и
+исключают `session_pass=true`.
 
 ### POST `/admin/sessions/{id}/approve`
 
-Помечает сессию `validation_status = approved`. Ответ `200`:
+Помечает завершённую сессию `validation_status = approved`. Активная сессия
+возвращает `409`, несуществующая — `404`. Ответ `200`:
 
 ```json
 { "session_id": "uuid", "validation_status": "approved" }

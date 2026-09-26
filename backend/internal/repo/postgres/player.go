@@ -157,11 +157,14 @@ func (s *Store) queryLeaderboard(ctx context.Context, where string, args []any, 
 // UpsertExternalUser creates or refreshes a profile linked to an external HR
 // system. It is idempotent by (source_system, external_user_id).
 func (s *Store) UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error) {
+	if assignedClassIDs == nil {
+		assignedClassIDs = []string{}
+	}
 	existing, err := s.GetPlayerByExternal(ctx, sourceSystem, externalUserID)
 	if err == nil {
 		_, updateErr := s.pool.Exec(ctx,
-			`UPDATE players SET display_name = $3, assigned_class_ids = $4, depot_id = $5, brigade_id = $6
-			 WHERE id = $1`, existing.ID, sourceSystem, displayName, assignedClassIDs, depotID, brigadeID)
+			`UPDATE players SET display_name = $2, assigned_class_ids = $3, depot_id = $4, brigade_id = $5
+			 WHERE id = $1`, existing.ID, displayName, assignedClassIDs, depotID, brigadeID)
 		if updateErr != nil {
 			return domain.Player{}, false, updateErr
 		}

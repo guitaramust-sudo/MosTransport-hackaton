@@ -22,14 +22,17 @@ func NewProfileService(store repo.Store) *ProfileService {
 }
 
 type Profile struct {
-	Player       domain.Player                `json:"player"`
-	Level        int                          `json:"level"`
+	Player       domain.Player                 `json:"player"`
+	Level        int                           `json:"level"`
 	Competencies []domain.CompetencyAssessment `json:"competencies"`
-	Achievements []string                     `json:"achievements"`
+	Achievements []string                      `json:"achievements"`
 }
 
 // levelForXP is a prototype level curve; it is not a normative ВСМ value.
 func levelForXP(xp int) int {
+	if xp < 0 {
+		return 1
+	}
 	return xp/100 + 1
 }
 

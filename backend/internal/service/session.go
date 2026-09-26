@@ -149,6 +149,16 @@ type SituationBreakdown struct {
 // Finish closes any remaining situations, computes the debrief and awards XP.
 // It is idempotent: XP is only awarded on the active→finished transition.
 func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UUID) (*Breakdown, error) {
+	for attempt := 0; attempt <= s.situationsNum; attempt++ {
+		breakdown, err := s.finishOnce(ctx, playerID, sessionID)
+		if !errors.Is(err, repo.ErrConflict) {
+			return breakdown, err
+		}
+	}
+	return nil, repo.ErrConflict
+}
+
+func (s *SessionService) finishOnce(ctx context.Context, playerID, sessionID uuid.UUID) (*Breakdown, error) {
 	sess, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
@@ -192,11 +202,12 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 		PointsNamespace:    s.pointsNamespace,
 		Competencies:       map[string]int{},
 	}
+	breakdown.UnresolvedCommitments = len(sess.PendingSituations)
 
 	competencyXP := map[string]int{}
 	competencyEvidence := map[string]int{}
 	loyaltySum, safetySum := 0, 0
-	allResolved := true
+	allResolved := len(sess.PendingSituations) == 0
 
 	for _, sit := range situations {
 		sb := SituationBreakdown{
@@ -252,16 +263,12 @@ func (s *SessionService) Finish(ctx context.Context, playerID, sessionID uuid.UU
 	breakdown.LeaderboardPointsDelta = breakdown.TotalXP
 
 	if wasActive {
-		awarded, err := s.store.FinishSessionAndAwardXP(ctx, sessionID, playerID, breakdown.TotalXP, time.Now())
-		if err != nil {
-			return nil, err
+		awards := make(map[string]repo.CompetencyAward, len(competencyXP))
+		for code, xp := range competencyXP {
+			awards[code] = repo.CompetencyAward{XP: xp, Evidence: competencyEvidence[code]}
 		}
-		if awarded {
-			for code, xp := range competencyXP {
-				if err := s.store.AddCompetencyXP(ctx, playerID, code, xp, competencyEvidence[code]); err != nil {
-					return nil, err
-				}
-			}
+		if _, err := s.store.FinishSessionAndAwardXP(ctx, sessionID, playerID, breakdown.TotalXP, awards, len(situations), len(sess.PendingSituations), time.Now()); err != nil {
+			return nil, err
 		}
 	}
 

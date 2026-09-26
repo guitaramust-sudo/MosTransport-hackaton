@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mostransport/vsm-trainer/internal/content"
 	"github.com/mostransport/vsm-trainer/internal/domain"
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
@@ -14,11 +15,12 @@ import (
 var ErrUserNotFound = errors.New("user not found")
 
 type AdminService struct {
-	store repo.Store
+	store   repo.Store
+	catalog content.Catalog
 }
 
-func NewAdminService(store repo.Store) *AdminService {
-	return &AdminService{store: store}
+func NewAdminService(store repo.Store, catalog content.Catalog) *AdminService {
+	return &AdminService{store: store, catalog: catalog}
 }
 
 // CreateExternalUserInput is the payload of POST /admin/users.
@@ -46,11 +48,12 @@ func (a *AdminService) ApproveSession(ctx context.Context, sessionID uuid.UUID) 
 }
 
 type LearningSummary struct {
-	Subject         LearningSubject         `json:"subject"`
-	TrainingScope   LearningTrainingScope   `json:"training_scope"`
-	SessionOutcomes LearningSessionOutcomes `json:"session_outcomes"`
+	DataStatus      string                        `json:"data_status"`
+	Subject         LearningSubject               `json:"subject"`
+	TrainingScope   LearningTrainingScope         `json:"training_scope"`
+	SessionOutcomes LearningSessionOutcomes       `json:"session_outcomes"`
 	Competencies    []domain.CompetencyAssessment `json:"competencies"`
-	Provenance      LearningProvenance      `json:"provenance"`
+	Provenance      LearningProvenance            `json:"provenance"`
 }
 
 type LearningSubject struct {
@@ -88,10 +91,10 @@ type RecentAssessment struct {
 }
 
 type LearningProvenance struct {
-	AsOf                time.Time `json:"as_of"`
-	ScenarioVersion     string    `json:"scenario_version"`
-	ScoringRuleVersion  string    `json:"scoring_rule_version"`
-	ExcludedDraftCount  int       `json:"excluded_draft_count"`
+	AsOf               time.Time `json:"as_of"`
+	ScenarioVersion    string    `json:"scenario_version"`
+	ScoringRuleVersion string    `json:"scoring_rule_version"`
+	ExcludedDraftCount int       `json:"excluded_draft_count"`
 }
 
 // LearningSummary builds the §4.1 HR/learning read model for a user, counting
@@ -111,11 +114,16 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 	}
 
 	approvedCompleted, approvedPassed, excludedDraft := 0, 0, 0
-	var recent []RecentAssessment
+	recent := []RecentAssessment{}
 	var lastAssessed *time.Time
+	approvedCompetencies := map[string]repo.CompetencyAward{}
+	scenarioTypes := map[string]string{}
+	for _, scenario := range a.catalog.Scenarios {
+		scenarioTypes[scenario.ID] = string(scenario.Type)
+	}
 
 	for _, sess := range sessions {
-		if sess.ValidationStatus != domain.ValidationApproved {
+		if sess.ValidationStatus != domain.ValidationApproved || sess.Status != domain.SessionStatusFinished {
 			excludedDraft++
 			continue
 		}
@@ -127,14 +135,23 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		}
 
 		ra := RecentAssessment{
-			SessionID:          sess.ID,
-			CompletedAt:        sess.FinishedAt,
-			WorldSafetyCurrent: 100,
-			SessionSafetyScore: 100,
-			SessionPass:        true,
+			SessionID:             sess.ID,
+			CompletedAt:           sess.FinishedAt,
+			WorldSafetyCurrent:    100,
+			SessionSafetyScore:    100,
+			SessionPass:           len(situations) > 0 && len(sess.PendingSituations) == 0,
+			UnresolvedCommitments: len(sess.PendingSituations),
 		}
 		loyaltySum, safetySum := 0, 0
 		for _, sit := range situations {
+			if sit.SituationDefID != nil {
+				if code := scenarioTypes[*sit.SituationDefID]; code != "" && sit.Outcome != nil && *sit.Outcome != "unfinished" {
+					award := approvedCompetencies[code]
+					award.XP += sit.XP
+					award.Evidence++
+					approvedCompetencies[code] = award
+				}
+			}
 			outcome := "unfinished"
 			if sit.Outcome != nil {
 				outcome = *sit.Outcome
@@ -164,13 +181,15 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		recent = append(recent, ra)
 	}
 
-	comps, err := a.store.GetPlayerCompetencies(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
 	all, err := a.store.ListCompetencies(ctx)
 	if err != nil {
 		return nil, err
+	}
+	var comps []domain.PlayerCompetency
+	for _, competency := range all {
+		if award, ok := approvedCompetencies[competency.Code]; ok {
+			comps = append(comps, domain.PlayerCompetency{CompetencyID: competency.ID, XP: award.XP, EvidenceCount: award.Evidence})
+		}
 	}
 	assessments := assessCompetencies(all, comps)
 
@@ -179,7 +198,12 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		validation = domain.ValidationApproved
 	}
 
+	dataStatus := "no_approved_data"
+	if approvedCompleted > 0 {
+		dataStatus = "available"
+	}
 	return &LearningSummary{
+		DataStatus: dataStatus,
 		Subject: LearningSubject{
 			UserID:           player.ID,
 			SourceSystem:     player.SourceSystem,
