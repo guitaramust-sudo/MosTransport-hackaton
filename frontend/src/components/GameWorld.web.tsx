@@ -15,6 +15,7 @@ const AISLE_MAX_X = 0.78
 const AISLE_MIN_Z = -6.2
 const AISLE_MAX_Z = 6.2
 const FLOOR_Y = 0.245
+const MOVE_SPEED = 2.6
 const questAnchors = [
   { x: -0.32, y: 1.5, z: 3.6 },
   { x: 1.26, y: 1.5, z: 1.2 },
@@ -28,7 +29,9 @@ function getQuestAnchor(quest?: GameQuest) {
 
 interface GameWorldProps {
   targetEventId: string
+  targetSeatIndex: number
   moveRequest: number
+  questCardsVisible: boolean
   onArrive: (questId: string) => void
   quests: GameQuest[]
   onQuestPress: (questId: string) => void
@@ -47,32 +50,39 @@ interface ProjectedQuest {
   visible: boolean
 }
 
+type MoveToQuest = (questId: string, seatIndex: number) => void
+
 function QuestProjector({ quests, onProject }: {
   quests: GameQuest[]
   onProject: (quests: ProjectedQuest[]) => void
 }) {
   const point = useRef(new Vector3())
-  const elapsed = useRef(0)
   const previous = useRef('')
+  const positions = useRef(new Map<string, ProjectedQuest>())
 
-  useFrame(({ camera, size }, delta) => {
-    elapsed.current += delta
-    if (elapsed.current < 0.08) return
-    elapsed.current = 0
-
+  useFrame(({ camera, size }) => {
     const projected = quests.map((quest) => {
       const anchor = getQuestAnchor(quest)
       point.current.set(anchor.x, anchor.y, anchor.z).project(camera)
-      const x = (point.current.x * 0.5 + 0.5) * size.width
-      const y = (-point.current.y * 0.5 + 0.5) * size.height
-      return {
+      const rawX = (point.current.x * 0.5 + 0.5) * size.width
+      const rawY = (-point.current.y * 0.5 + 0.5) * size.height
+      const old = positions.current.get(quest.id)
+      const x = Math.round(rawX * 2) / 2
+      const y = Math.round(rawY * 2) / 2
+      const wasVisible = old?.visible ?? false
+      const next = {
         id: quest.id,
         x,
         y,
-        visible: point.current.z > -1 && point.current.z < 1 && x > -80 && x < size.width + 80 && y > 170 && y < size.height - 90,
+        visible: point.current.z > -1 && point.current.z < 1 && x > -80 && x < size.width + 80 &&
+          y > (wasVisible ? 150 : 170) && y < size.height - (wasVisible ? 70 : 90),
       }
+      positions.current.set(quest.id, next)
+      return next
     })
-    const signature = projected.map((quest) => `${quest.id}:${Math.round(quest.x)}:${Math.round(quest.y)}:${quest.visible}`).join('|')
+    const activeIds = new Set(quests.map((quest) => quest.id))
+    positions.current.forEach((_, id) => { if (!activeIds.has(id)) positions.current.delete(id) })
+    const signature = projected.map((quest) => `${quest.id}:${quest.x}:${quest.y}:${quest.visible}`).join('|')
     if (signature !== previous.current) {
       previous.current = signature
       onProject(projected)
@@ -96,8 +106,9 @@ function QuestProjector({ quests, onProject }: {
   )
 }
 
-function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }: GameWorldProps & {
+function World({ targetEventId, targetSeatIndex, moveRequest, onArrive, playerPosition, moveToQuest }: GameWorldProps & {
   playerPosition: MutableRefObject<PlayerPosition>
+  moveToQuest: MutableRefObject<MoveToQuest | null>
 }) {
   const wagon = useGLTF(wagonAsset) as unknown as { scene: Group }
   const conductor = useGLTF(conductorAsset) as unknown as { scene: Group; animations: AnimationClip[] }
@@ -105,6 +116,8 @@ function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }:
   const target = useRef({ x: AISLE_X, z: 0 })
   const moving = useRef(false)
   const arrivalSent = useRef(true)
+  const arrivalQuestId = useRef(targetEventId)
+  const directTargetId = useRef<string | null>(null)
   const [destination, setDestination] = useState({ x: AISLE_X, z: 0 })
   const { actions } = useAnimations(conductor.animations, conductor.scene) as unknown as {
     actions: Record<string, AnimationAction | null>
@@ -123,6 +136,13 @@ function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }:
     actions.Walk?.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).fadeIn(0.18).play()
   }
 
+  moveToQuest.current = (questId, seatIndex) => {
+    const anchor = questAnchors[seatIndex % questAnchors.length]
+    directTargetId.current = questId
+    arrivalQuestId.current = questId
+    startMoving(AISLE_X, anchor.z, true)
+  }
+
   useEffect(() => {
     character.current?.position.set(AISLE_X, FLOOR_Y, 0)
     conductor.scene.position.set(0, 0, 0)
@@ -137,9 +157,14 @@ function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }:
 
   useEffect(() => {
     if (moveRequest === 0) return
-    const anchor = getQuestAnchor(quests.find((quest) => quest.id === targetEventId))
+    if (directTargetId.current === targetEventId) {
+      directTargetId.current = null
+      return
+    }
+    const anchor = questAnchors[targetSeatIndex % questAnchors.length]
+    arrivalQuestId.current = targetEventId
     startMoving(AISLE_X, anchor.z, true)
-  }, [actions, moveRequest, targetEventId])
+  }, [moveRequest, targetEventId, targetSeatIndex])
 
   useFrame((_, delta) => {
     if (!character.current) return
@@ -153,7 +178,7 @@ function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }:
     const dz = target.current.z - character.current.position.z
     const distance = Math.hypot(dx, dz)
     character.current.rotation.y = Math.atan2(dx, dz)
-    const step = Math.min(distance, delta * 2.25)
+    const step = Math.min(distance, delta * MOVE_SPEED)
 
     if (distance > 0) {
       character.current.position.x += (dx / distance) * step
@@ -169,7 +194,7 @@ function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }:
       actions.Idle?.reset().fadeIn(0.18).play()
       if (!arrivalSent.current) {
         arrivalSent.current = true
-        onArrive(targetEventId)
+        onArrive(arrivalQuestId.current)
       }
     }
   })
@@ -232,6 +257,7 @@ function GameCamera({ playerPosition }: { playerPosition: MutableRefObject<Playe
 
 export function GameWorld(props: GameWorldProps) {
   const playerPosition = useRef<PlayerPosition>({ x: AISLE_X, y: FLOOR_Y, z: 0 })
+  const moveToQuest = useRef<MoveToQuest | null>(null)
   const [projectedQuests, setProjectedQuests] = useState<ProjectedQuest[]>([])
 
   return (
@@ -242,33 +268,41 @@ export function GameWorld(props: GameWorldProps) {
           <GameCamera playerPosition={playerPosition} />
           <ambientLight intensity={1.65} />
           <directionalLight position={[6, 14, 8]} intensity={2.2} castShadow />
-          <World {...props} playerPosition={playerPosition} />
+          <World {...props} playerPosition={playerPosition} moveToQuest={moveToQuest} />
           <QuestProjector quests={props.quests} onProject={setProjectedQuests} />
         </Canvas>
       </Suspense>
-      {projectedQuests.map((projected) => {
-        const quest = props.quests.find((item) => item.id === projected.id)
-        if (!quest || !projected.visible) return null
-        return (
-          <Pressable
-            key={quest.id}
-            onPress={() => props.onQuestPress(quest.id)}
-            style={[
-              styles.questCard,
-              quest.priority === 'critical' && styles.questCardCritical,
-              { left: projected.x - 68, top: projected.y - 76 },
-            ]}
-          >
-            <View style={[styles.questBadge, quest.priority === 'critical' && styles.questBadgeCritical]}>
-              <Text style={styles.questBadgeText}>{quest.priority === 'critical' ? '!' : '◆'}</Text>
-            </View>
-            <View style={styles.questCopy}>
-              <Text numberOfLines={2} style={styles.questTitle}>{quest.title}</Text>
-              <Text numberOfLines={1} style={styles.questLocation}>{quest.location}</Text>
-            </View>
-          </Pressable>
-        )
-      })}
+      <View pointerEvents="box-none" style={styles.questLayer}>
+        {props.questCardsVisible && projectedQuests.map((projected) => {
+          const quest = props.quests.find((item) => item.id === projected.id)
+          if (!quest || !projected.visible) return null
+          return (
+            <Pressable
+              key={quest.id}
+              hitSlop={14}
+              pressRetentionOffset={28}
+              onPressIn={() => {
+                moveToQuest.current?.(quest.id, quest.seatIndex)
+                props.onQuestPress(quest.id)
+              }}
+              style={({ pressed }) => [
+                styles.questCard,
+                quest.priority === 'critical' && styles.questCardCritical,
+                pressed && styles.questCardPressed,
+                { left: Math.round(projected.x) - 68, top: Math.round(projected.y) - 76 },
+              ]}
+            >
+              <View style={[styles.questBadge, quest.priority === 'critical' && styles.questBadgeCritical]}>
+                <Text style={styles.questBadgeText}>{quest.priority === 'critical' ? '!' : '◆'}</Text>
+              </View>
+              <View style={styles.questCopy}>
+                <Text numberOfLines={2} style={styles.questTitle}>{quest.title}</Text>
+                <Text numberOfLines={1} style={styles.questLocation}>{quest.location}</Text>
+              </View>
+            </Pressable>
+          )
+        })}
+      </View>
     </View>
   )
 }
@@ -276,7 +310,9 @@ export function GameWorld(props: GameWorldProps) {
 const styles = StyleSheet.create({
   root: { position: 'absolute', inset: 0, backgroundColor: '#BFD7CF' },
   loader: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' },
-  questCard: { position: 'absolute', width: 136, minHeight: 58, flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 15, borderWidth: 2, borderColor: '#8B4EE9', backgroundColor: 'rgba(255,255,255,0.96)', elevation: 7 },
+  questLayer: { position: 'absolute', inset: 0, zIndex: 20 },
+  questCard: { position: 'absolute', zIndex: 21, width: 136, minHeight: 58, flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 15, borderWidth: 2, borderColor: '#8B4EE9', backgroundColor: 'rgba(255,255,255,0.96)', elevation: 12 },
+  questCardPressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
   questCardCritical: { borderColor: '#F05A67' },
   questBadge: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 11, backgroundColor: '#8B4EE9' },
   questBadgeCritical: { backgroundColor: '#F05A67' },

@@ -171,9 +171,18 @@ export function SimulationPage() {
 
   const seconds = situation?.timer_deadline ? Math.max(0, Math.ceil((Date.parse(situation.timer_deadline) - now) / 1000)) : null
   const targetId = approachingId ?? situationId ?? quests[0]?.id ?? ''
+  const targetSeatIndex = quests.find((quest) => quest.id === targetId)?.seatIndex ?? 0
 
   return <View style={styles.screen}>
-    <GameWorld targetEventId={targetId} moveRequest={moveRequest} quests={quests} onQuestPress={chooseQuest} onArrive={arriveAtQuest} />
+    <GameWorld
+      targetEventId={targetId}
+      targetSeatIndex={targetSeatIndex}
+      moveRequest={moveRequest}
+      questCardsVisible={!panelOpen}
+      quests={quests}
+      onQuestPress={chooseQuest}
+      onArrive={arriveAtQuest}
+    />
 
     <View style={styles.topBar} pointerEvents="box-none">
       <Pressable style={styles.menuButton} onPress={() => dispatch(navigate('scenarios'))}><Text style={styles.menuIcon}>‹</Text></Pressable>
