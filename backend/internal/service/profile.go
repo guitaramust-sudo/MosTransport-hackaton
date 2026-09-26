@@ -54,11 +54,15 @@ func (s *ProfileService) Get(ctx context.Context, playerID uuid.UUID) (*Profile,
 	}
 
 	assessments := assessCompetencies(all, comps)
+	achievements, err := s.store.ListAchievementCodes(ctx, playerID)
+	if err != nil {
+		return nil, err
+	}
 	return &Profile{
 		Player:       player,
 		Level:        levelForXP(player.TotalXP),
 		Competencies: assessments,
-		Achievements: []string{},
+		Achievements: achievements,
 	}, nil
 }
 

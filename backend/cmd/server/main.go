@@ -148,6 +148,8 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 	r.Route("/api", func(r chi.Router) {
 		r.Use(appmiddleware.JWTAuth(auth))
 		r.Get("/profile", h.GetProfile)
+		r.Get("/notifications", h.GetNotifications)
+		r.Get("/challenges/weekly", h.GetChallenge)
 		r.Get("/leaderboard", h.GetLeaderboard)
 		r.Get("/leaderboards", h.GetScopedLeaderboard)
 		r.Post("/session/start", h.StartSession)

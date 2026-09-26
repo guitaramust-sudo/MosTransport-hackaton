@@ -66,6 +66,26 @@ func (h *Handlers) SimulationResult(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handlers) GetNotifications(w http.ResponseWriter, r *http.Request) {
+	playerID, _ := middleware.PlayerIDFromContext(r.Context())
+	items, err := h.Simulation.Notifications(r.Context(), playerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notifications": items})
+}
+
+func (h *Handlers) GetChallenge(w http.ResponseWriter, r *http.Request) {
+	playerID, _ := middleware.PlayerIDFromContext(r.Context())
+	progress, err := h.Simulation.Challenge(r.Context(), playerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, progress)
+}
+
 type simulationActionRequest struct {
 	CommandID            uuid.UUID `json:"command_id"`
 	ExpectedStateVersion int       `json:"expected_state_version"`

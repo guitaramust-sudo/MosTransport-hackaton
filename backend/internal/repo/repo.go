@@ -28,6 +28,9 @@ type SimulationStore interface {
 	ApplySimulationCommand(ctx context.Context, runID, playerID, commandID uuid.UUID, expectedVersion int, apply func(domain.SimulationRun) (domain.SimulationRun, error)) (domain.SimulationRun, error)
 	AdvanceSimulationTimer(ctx context.Context, runID, playerID uuid.UUID, apply func(domain.SimulationRun) (domain.SimulationRun, bool)) (domain.SimulationRun, error)
 	ListDueSimulationRuns(ctx context.Context, now time.Time) ([]domain.SimulationDueRun, error)
+	FinalizeSimulationRewards(ctx context.Context, run domain.SimulationRun) error
+	ListNotifications(ctx context.Context, playerID uuid.UUID) ([]domain.Notification, error)
+	GetChallengeProgress(ctx context.Context, playerID uuid.UUID, now time.Time) (domain.ChallengeProgress, error)
 }
 
 // LockedSituation is a transaction-scoped view used while closing a situation.
@@ -49,6 +52,7 @@ type Store interface {
 	AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp, evidence int) error
 	ListCompetencies(ctx context.Context) ([]domain.Competency, error)
 	GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) ([]domain.PlayerCompetency, error)
+	ListAchievementCodes(ctx context.Context, playerID uuid.UUID) ([]string, error)
 	Leaderboard(ctx context.Context, limit int) ([]domain.Player, error)
 	LeaderboardScoped(ctx context.Context, scope, groupID string, limit int) ([]domain.Player, error)
 	UpsertExternalUser(ctx context.Context, sourceSystem, externalUserID string, displayName, depotID, brigadeID *string, assignedClassIDs []string) (domain.Player, bool, error)

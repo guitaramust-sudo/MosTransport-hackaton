@@ -112,6 +112,23 @@ func (s *Store) GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) (
 	return out, rows.Err()
 }
 
+func (s *Store) ListAchievementCodes(ctx context.Context, playerID uuid.UUID) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT code FROM achievements WHERE player_id = $1 ORDER BY earned_at, code`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		out = append(out, code)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Leaderboard(ctx context.Context, limit int) ([]domain.Player, error) {
 	return s.queryLeaderboard(ctx, ``, nil, limit)
 }

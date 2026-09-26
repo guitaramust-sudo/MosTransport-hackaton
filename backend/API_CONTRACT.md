@@ -155,13 +155,28 @@
       "evidence_count": 3
     }
   ],
-  "achievements": []
+  "achievements": ["first_complete", "first_signal"]
 }
 ```
 
 `level = total_xp/100 + 1` (прототипная кривая). Компетенции соответствуют
 типам ситуаций: `service`, `conflict`, `medical`, `safety`, `informational`
 (плюс служебные `empathy`, `communication` из ранних версий).
+Достижения появляются после завершения демонстрационной simulation-смены;
+`first_signal` требует осмотра скрытого сигнала.
+
+### GET `/api/notifications`
+
+Возвращает `{ "notifications": [...] }` для текущего игрока. В демо создаются
+типы `new_scenario`, `challenge_started`, `challenge_completed`; записи
+идемпотентны по игроку, типу и предмету уведомления.
+
+### GET `/api/challenges/weekly`
+
+Возвращает `{"challenge_id":"weekly_variety_1","seed_variants":1,"target":2,
+"completed":false,"reward_xp":5}`. Два зачтённых прохождения разных серверных
+вариантов A/B в одной UTC-неделе дают один раз `+5 XP`; награда не добавляет
+отдельных очков рейтинга.
 
 ### GET `/api/leaderboard`
 
@@ -205,7 +220,8 @@
     "scenario_version": "1.0.0", "content_validation_status": "draft",
     "state_version": 0, "status": "active", "loyalty": 80, "safety": 100,
     "location": "passenger_zone", "game_time_s": 0,
-    "deadline_at": "2026-09-26T12:01:00Z", "timed_out": false, "path": []
+    "deadline_at": "2026-09-26T12:01:00Z", "timed_out": false,
+    "seed_variant": "A", "path": []
   },
   "event": {
     "id": "service_request", "location": "passenger_zone",

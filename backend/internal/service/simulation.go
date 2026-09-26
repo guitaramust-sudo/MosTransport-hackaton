@@ -42,6 +42,7 @@ type SimulationStateView struct {
 	Path                    []string   `json:"path"`
 	Location                string     `json:"location"`
 	GameTimeS               int        `json:"game_time_s"`
+	SeedVariant             string     `json:"seed_variant"`
 	DeadlineAt              *time.Time `json:"deadline_at,omitempty"`
 	TimedOut                bool       `json:"timed_out"`
 }
@@ -119,13 +120,27 @@ func (s *SimulationService) ActionCommand(ctx context.Context, playerID, runID, 
 			if err == nil && next.Status == "finished" && current.Status != "finished" {
 				now := time.Now().UTC()
 				next.FinishedAt = &now
+				next.Passed = simulationPass(next)
 			}
 			return next, err
 		})
 	if err != nil {
 		return SimulationView{}, err
 	}
+	if run.Status == "finished" {
+		if err := s.store.FinalizeSimulationRewards(ctx, run); err != nil {
+			return SimulationView{}, err
+		}
+	}
 	return s.view(run)
+}
+
+func (s *SimulationService) Notifications(ctx context.Context, playerID uuid.UUID) ([]domain.Notification, error) {
+	return s.store.ListNotifications(ctx, playerID)
+}
+
+func (s *SimulationService) Challenge(ctx context.Context, playerID uuid.UUID) (domain.ChallengeProgress, error) {
+	return s.store.GetChallengeProgress(ctx, playerID, time.Now())
 }
 
 type SimulationDebriefEntry struct {
@@ -156,6 +171,9 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 	if run.Status != "finished" {
 		return SimulationResult{}, ErrSimulationActive
 	}
+	if err := s.store.FinalizeSimulationRewards(ctx, run); err != nil {
+		return SimulationResult{}, err
+	}
 	template, err := s.templateFor(run)
 	if err != nil {
 		return SimulationResult{}, err
@@ -164,12 +182,8 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 	if err != nil {
 		return SimulationResult{}, err
 	}
-	negativeSafety := 0
 	debrief := make([]SimulationDebriefEntry, 0, len(run.ActionLog))
 	for _, entry := range run.ActionLog {
-		if entry.SafetyAfter < entry.SafetyBefore {
-			negativeSafety += entry.SafetyAfter - entry.SafetyBefore
-		}
 		row := SimulationDebriefEntry{SimulationLogEntry: entry, BetterOptions: []string{}}
 		if event, ok := template.Event(entry.EventID); ok {
 			var chosen *simulation.Choice
@@ -187,13 +201,27 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 		}
 		debrief = append(debrief, row)
 	}
-	safetyScore := clamp(100+negativeSafety, 0, 100)
+	safetyScore := simulationSafetyScore(run.ActionLog)
 	return SimulationResult{SessionID: run.ID, ScenarioVersion: run.ScenarioVersion,
 		ScoringRuleVersion: "simulation-demo-v1", ValidationStatus: template.ValidationStatus,
 		CompletedAt: run.FinishedAt, WorldSafetyCurrent: run.Safety, SessionSafetyScore: safetyScore,
 		Loyalty: run.Loyalty, TimedOut: run.TimedOut,
-		SessionPass:   !run.TimedOut && safetyScore >= 90 && run.Safety >= 90 && run.Loyalty >= 60,
+		SessionPass:   simulationPass(run),
 		ActionLogHash: fmt.Sprintf("%x", sha256.Sum256(raw)), Debrief: debrief}, nil
+}
+
+func simulationSafetyScore(log []domain.SimulationLogEntry) int {
+	negative := 0
+	for _, entry := range log {
+		if entry.SafetyAfter < entry.SafetyBefore {
+			negative += entry.SafetyAfter - entry.SafetyBefore
+		}
+	}
+	return clamp(100+negative, 0, 100)
+}
+
+func simulationPass(run domain.SimulationRun) bool {
+	return run.Status == "finished" && !run.TimedOut && simulationSafetyScore(run.ActionLog) >= 90 && run.Safety >= 90 && run.Loyalty >= 60
 }
 
 func (s *SimulationService) advanceTimer(ctx context.Context, playerID, runID uuid.UUID, now time.Time) (domain.SimulationRun, error) {
@@ -236,7 +264,8 @@ func (s *SimulationService) view(run domain.SimulationRun) (SimulationView, erro
 		ID: run.ID, ScenarioID: run.ScenarioID, ScenarioVersion: run.ScenarioVersion,
 		ContentValidationStatus: template.ValidationStatus, StateVersion: run.StateVersion,
 		Status: run.Status, Loyalty: run.Loyalty, Safety: run.Safety, Path: run.Path,
-		Location: run.Location, GameTimeS: run.GameTimeS, DeadlineAt: run.DeadlineAt, TimedOut: run.TimedOut,
+		Location: run.Location, GameTimeS: run.GameTimeS, SeedVariant: run.SeedVariant,
+		DeadlineAt: run.DeadlineAt, TimedOut: run.TimedOut,
 	}}
 	view.Events = []SimulationEventView{}
 	view.ObservableCues = []string{}

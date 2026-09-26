@@ -24,6 +24,8 @@ type SimulationRun struct {
 	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 	DeadlineAt       *time.Time           `json:"deadline_at,omitempty"`
 	TimedOut         bool                 `json:"timed_out"`
+	Passed           bool                 `json:"passed"`
+	SeedVariant      string               `json:"seed_variant"`
 	ActionLog        []SimulationLogEntry `json:"action_log"`
 	Flags            map[string]bool      `json:"flags"`
 	Loyalty          int                  `json:"loyalty"`
@@ -48,4 +50,20 @@ type SimulationLogEntry struct {
 type SimulationDueRun struct {
 	ID       uuid.UUID
 	PlayerID uuid.UUID
+}
+
+type Notification struct {
+	ID         int64           `json:"id"`
+	Type       string          `json:"type"`
+	SubjectKey string          `json:"subject_key"`
+	Payload    json.RawMessage `json:"payload"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+type ChallengeProgress struct {
+	ChallengeID  string `json:"challenge_id"`
+	SeedVariants int    `json:"seed_variants"`
+	Target       int    `json:"target"`
+	Completed    bool   `json:"completed"`
+	RewardXP     int    `json:"reward_xp"`
 }

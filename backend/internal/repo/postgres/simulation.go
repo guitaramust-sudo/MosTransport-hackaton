@@ -15,12 +15,50 @@ import (
 
 func (s *Store) CreateSimulationRun(ctx context.Context, run domain.SimulationRun) (domain.SimulationRun, error) {
 	run.ID = uuid.New()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return domain.SimulationRun{}, err
+	}
+	defer tx.Rollback(ctx)
+	var playerID uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT id FROM players WHERE id = $1 FOR UPDATE`, run.PlayerID).Scan(&playerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.SimulationRun{}, repo.ErrNotFound
+	}
+	if err != nil {
+		return domain.SimulationRun{}, err
+	}
+	var previous int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM simulation_runs WHERE player_id = $1`, run.PlayerID).Scan(&previous); err != nil {
+		return domain.SimulationRun{}, err
+	}
+	run.SeedVariant = []string{"A", "B"}[previous%2]
+	if run.SeedVariant == "B" && len(run.ActiveEventIDs) >= 2 {
+		run.ActiveEventIDs[0], run.ActiveEventIDs[1] = run.ActiveEventIDs[1], run.ActiveEventIDs[0]
+		run.CurrentEventID = run.ActiveEventIDs[0]
+	}
 	raw, err := json.Marshal(run)
 	if err != nil {
 		return domain.SimulationRun{}, err
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO simulation_runs (id, player_id, state, deadline_at) VALUES ($1, $2, $3, $4)`, run.ID, run.PlayerID, raw, run.DeadlineAt)
-	return run, err
+	if _, err := tx.Exec(ctx, `INSERT INTO simulation_runs (id, player_id, state, deadline_at) VALUES ($1, $2, $3, $4)`, run.ID, run.PlayerID, raw, run.DeadlineAt); err != nil {
+		return domain.SimulationRun{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO notifications (player_id, type, subject_key, payload)
+		VALUES ($1, 'new_scenario', $2, jsonb_build_object('scenario_id', $3::text, 'version', $4::text)) ON CONFLICT DO NOTHING`,
+		run.PlayerID, run.ScenarioID+":"+run.ScenarioVersion, run.ScenarioID, run.ScenarioVersion); err != nil {
+		return domain.SimulationRun{}, err
+	}
+	period := weekStart(run.StartedAt)
+	if _, err := tx.Exec(ctx, `INSERT INTO notifications (player_id, type, subject_key, payload)
+		VALUES ($1, 'challenge_started', $2::text, jsonb_build_object('challenge_id', 'weekly_variety_1', 'target', 2)) ON CONFLICT DO NOTHING`,
+		run.PlayerID, "weekly_variety_1:"+period.Format("2006-01-02")); err != nil {
+		return domain.SimulationRun{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.SimulationRun{}, err
+	}
+	return run, nil
 }
 
 func (s *Store) GetSimulationRun(ctx context.Context, runID, playerID uuid.UUID) (domain.SimulationRun, error) {

@@ -103,8 +103,9 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	promised, err := svc.Action(ctx, player.ID, second.Run.ID, uuid.New(), 0, "promise_immediately")
-	if err != nil || promised.Event.ID != "unconfirmed_promise" || promised.Run.Loyalty != 76 {
+	promised, err := svc.ActionCommand(ctx, player.ID, second.Run.ID, uuid.New(), 0,
+		simulation.Command{EventID: "service_request", ChoiceID: "promise_immediately"})
+	if err != nil || promised.Run.Loyalty != 76 || len(promised.Events) != 2 || promised.Events[1].ID != "unconfirmed_promise" {
 		t.Fatalf("second branch: %+v, %v", promised, err)
 	}
 	if _, err := svc.Get(ctx, uuid.New(), first.Run.ID); !errors.Is(err, repo.ErrNotFound) {
