@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -73,6 +74,12 @@ func TestLearningSummaryUsesApprovedEvidenceOnly(t *testing.T) {
 			t.Fatalf("draft evidence leaked: %+v", competency)
 		}
 	}
+	if err := admin.ApproveSession(ctx, sess.ID); !errors.Is(err, ErrUnapprovedContent) {
+		t.Fatalf("draft scenario was approved: %v", err)
+	}
+	catalog.Scenarios[0].ValidationStatus = "approved"
+	catalog.Scenarios[0].ReviewerID = "test-reviewer"
+	catalog.Scenarios[0].SourceRefs = []string{"test-source"}
 	if err := admin.ApproveSession(ctx, sess.ID); err != nil {
 		t.Fatal(err)
 	}

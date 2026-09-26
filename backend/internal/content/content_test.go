@@ -37,6 +37,8 @@ func TestCatalogRejectsInvalidData(t *testing.T) {
 		{"duplicate scenario", func(c *Catalog) { c.Scenarios[1].ID = c.Scenarios[0].ID }, "duplicate id"},
 		{"bad type", func(c *Catalog) { c.Scenarios[0].Type = "unknown" }, "invalid type"},
 		{"bad criticality", func(c *Catalog) { c.Scenarios[0].Criticality = "unknown" }, "invalid criticality"},
+		{"missing validation", func(c *Catalog) { c.Scenarios[0].ValidationStatus = "" }, "invalid validation_status"},
+		{"approved without review", func(c *Catalog) { c.Scenarios[0].ValidationStatus = "approved" }, "requires reviewer_id"},
 		{"missing point", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.MustConvey = nil }, "must_convey"},
 		{"duplicate point", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.MustConvey[1].ID = "A" }, "duplicate must_convey"},
 		{"bad target", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.Escalation.To[0] = "station" }, "escalation target"},

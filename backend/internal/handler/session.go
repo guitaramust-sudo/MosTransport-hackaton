@@ -16,26 +16,27 @@ import (
 )
 
 type situationDTO struct {
-	ID             uuid.UUID       `json:"id"`
-	Status         string          `json:"status"`
-	SituationDefID *string         `json:"situation_def_id,omitempty"`
-	PassengerID    *string         `json:"passenger_id,omitempty"`
-	Code           string          `json:"code"`
-	Name           string          `json:"name"`
-	Language       string          `json:"language,omitempty"`
-	Scenario       string          `json:"scenario"`
-	Opening        string          `json:"opening,omitempty"`
-	Loyalty        int             `json:"loyalty"`
-	Safety         int             `json:"safety"`
-	TimerDeadline  *time.Time      `json:"timer_deadline"`
-	Outcome        *string         `json:"outcome,omitempty"`
-	Escalations    []string        `json:"escalations"`
-	XP             int             `json:"xp"`
-	Remarks        json.RawMessage `json:"remarks,omitempty"`
-	ScoreResult    json.RawMessage `json:"score_result,omitempty"`
-	Tone           string          `json:"tone,omitempty"`
-	Conveyed       []string        `json:"conveyed,omitempty"`
-	Missed         []string        `json:"missed,omitempty"`
+	ID                      uuid.UUID       `json:"id"`
+	Status                  string          `json:"status"`
+	SituationDefID          *string         `json:"situation_def_id,omitempty"`
+	PassengerID             *string         `json:"passenger_id,omitempty"`
+	Code                    string          `json:"code"`
+	Name                    string          `json:"name"`
+	Language                string          `json:"language,omitempty"`
+	Scenario                string          `json:"scenario"`
+	ContentValidationStatus string          `json:"content_validation_status,omitempty"`
+	Opening                 string          `json:"opening,omitempty"`
+	Loyalty                 int             `json:"loyalty"`
+	Safety                  int             `json:"safety"`
+	TimerDeadline           *time.Time      `json:"timer_deadline"`
+	Outcome                 *string         `json:"outcome,omitempty"`
+	Escalations             []string        `json:"escalations"`
+	XP                      int             `json:"xp"`
+	Remarks                 json.RawMessage `json:"remarks,omitempty"`
+	ScoreResult             json.RawMessage `json:"score_result,omitempty"`
+	Tone                    string          `json:"tone,omitempty"`
+	Conveyed                []string        `json:"conveyed,omitempty"`
+	Missed                  []string        `json:"missed,omitempty"`
 }
 
 func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
@@ -58,6 +59,7 @@ func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
 		d.Name, _ = p["name"].(string)
 		d.Language, _ = p["language"].(string)
 		d.Scenario, _ = p["scenario"].(string)
+		d.ContentValidationStatus, _ = p["content_validation_status"].(string)
 		if includeOpening {
 			d.Opening, _ = p["opening"].(string)
 		}
@@ -76,6 +78,10 @@ func (h *Handlers) StartSession(w http.ResponseWriter, r *http.Request) {
 
 	sess, situations, err := h.Session.Start(r.Context(), playerID)
 	if err != nil {
+		if errors.Is(err, service.ErrNoEligibleScenarios) {
+			writeError(w, http.StatusConflict, "no approved scenarios available for this namespace")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to start session")
 		return
 	}

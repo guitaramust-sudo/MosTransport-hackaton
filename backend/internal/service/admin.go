@@ -13,6 +13,7 @@ import (
 )
 
 var ErrUserNotFound = errors.New("user not found")
+var ErrUnapprovedContent = errors.New("session contains unapproved content")
 
 type AdminService struct {
 	store   repo.Store
@@ -44,6 +45,29 @@ func (a *AdminService) CreateExternalUser(ctx context.Context, in CreateExternal
 }
 
 func (a *AdminService) ApproveSession(ctx context.Context, sessionID uuid.UUID) error {
+	sess, err := a.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if sess.Status != domain.SessionStatusFinished {
+		return repo.ErrConflict
+	}
+	situations, err := a.store.ListSituationsBySession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	approved := map[string]bool{}
+	for _, scenario := range a.catalog.Scenarios {
+		approved[scenario.ID] = scenario.ValidationStatus == "approved"
+	}
+	if len(situations) == 0 {
+		return ErrUnapprovedContent
+	}
+	for _, sit := range situations {
+		if sit.SituationDefID == nil || !approved[*sit.SituationDefID] {
+			return ErrUnapprovedContent
+		}
+	}
 	return a.store.ApproveSession(ctx, sessionID)
 }
 

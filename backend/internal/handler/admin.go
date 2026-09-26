@@ -46,6 +46,10 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "session is not finished")
 			return
 		}
+		if errors.Is(err, service.ErrUnapprovedContent) {
+			writeError(w, http.StatusConflict, "session contains unapproved content")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

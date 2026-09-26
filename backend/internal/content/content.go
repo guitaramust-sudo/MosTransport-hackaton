@@ -60,6 +60,9 @@ type Scenario struct {
 	ID                string            `json:"id"`
 	Type              ScenarioType      `json:"type"`
 	Criticality       Criticality       `json:"criticality"`
+	ValidationStatus  string            `json:"validation_status"`
+	ReviewerID        string            `json:"reviewer_id,omitempty"`
+	SourceRefs        []string          `json:"source_refs,omitempty"`
 	Title             string            `json:"title"`
 	Opening           string            `json:"opening"`
 	CorrectCompletion CorrectCompletion `json:"correct_completion"`
@@ -126,6 +129,12 @@ func (c Catalog) Validate() error {
 		}
 		if !oneOf(string(s.Criticality), "critical", "high", "medium", "low") {
 			return fmt.Errorf("%s: invalid criticality %q", where, s.Criticality)
+		}
+		if !oneOf(s.ValidationStatus, "draft", "approved", "blocked") {
+			return fmt.Errorf("%s: invalid validation_status %q", where, s.ValidationStatus)
+		}
+		if s.ValidationStatus == "approved" && (blank(s.ReviewerID) || len(s.SourceRefs) == 0) {
+			return fmt.Errorf("%s: approved scenario requires reviewer_id and source_refs", where)
 		}
 		if blank(s.Title) || blank(s.Opening) || s.TimeLimitSec <= 0 {
 			return fmt.Errorf("%s: title, opening and positive time_limit_sec required", where)

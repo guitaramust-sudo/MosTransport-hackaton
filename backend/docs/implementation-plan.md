@@ -11,7 +11,7 @@ describe behavior, compatibility, and verification.
 
 | Stage | Work | Done when |
 | --- | --- | --- |
-| 1 | Secure admin access and mark demo content | Public registration cannot claim an admin email; demo scenarios cannot silently become approved professional training. |
+| 1 | Secure admin access and mark demo content | Public registration cannot claim an admin email; demo scenarios cannot silently become approved professional training. Complete. |
 | 2 | Branching scenario actions | A server-side action with a stable command ID and expected version applies configured conditions/effects atomically; at least two choices lead to different subsequent events. |
 | 3 | Concurrent events, observation, and wagon zones | Two events can coexist; an indirect cue is discovered through an action; movement and interaction have server-controlled spatial/time costs. |
 | 4 | Timers, causal log, and debrief | A server deadline changes event state once; the action/effect log explains every score change and an alternative; the whole session is scored from that log. |

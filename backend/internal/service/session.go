@@ -16,6 +16,7 @@ import (
 )
 
 var ErrSessionNotFound = errors.New("session not found")
+var ErrNoEligibleScenarios = errors.New("no eligible scenarios for this points namespace")
 
 type SessionService struct {
 	store           repo.Store
@@ -33,7 +34,16 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 	if err := s.catalog.Validate(); err != nil {
 		return nil, nil, err
 	}
-	selected := pickScenarios(s.catalog.Scenarios, s.situationsNum)
+	pool := make([]content.Scenario, 0, len(s.catalog.Scenarios))
+	for _, scenario := range s.catalog.Scenarios {
+		if scenario.ValidationStatus == "approved" || (s.pointsNamespace == "demo" && scenario.ValidationStatus == "draft") {
+			pool = append(pool, scenario)
+		}
+	}
+	if len(pool) == 0 {
+		return nil, nil, ErrNoEligibleScenarios
+	}
+	selected := pickScenarios(pool, s.situationsNum)
 
 	first := selected[0]
 	pending := make([]string, 0, len(selected)-1)
@@ -60,17 +70,18 @@ func buildSituationDraft(scenario content.Scenario, passenger content.Passenger)
 	deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
 	scenarioID, passengerID := scenario.ID, passenger.ID
 	params := map[string]any{
-		"code":             scenario.ID,
-		"name":             passenger.ID,
-		"persona":          passenger.PromptHint,
-		"scenario":         scenario.Title,
-		"opening":          scenario.Opening,
-		"situation_def_id": scenario.ID,
-		"passenger_id":     passenger.ID,
-		"prompt_hint":      passenger.PromptHint,
-		"language":         passenger.Language,
-		"traits":           passenger.Traits,
-		"traits_text":      strings.Join(passenger.Traits, ", "),
+		"code":                      scenario.ID,
+		"name":                      passenger.ID,
+		"persona":                   passenger.PromptHint,
+		"scenario":                  scenario.Title,
+		"content_validation_status": scenario.ValidationStatus,
+		"opening":                   scenario.Opening,
+		"situation_def_id":          scenario.ID,
+		"passenger_id":              passenger.ID,
+		"prompt_hint":               passenger.PromptHint,
+		"language":                  passenger.Language,
+		"traits":                    passenger.Traits,
+		"traits_text":               strings.Join(passenger.Traits, ", "),
 	}
 	return domain.Situation{
 		Status:          domain.SituationStatusActive,

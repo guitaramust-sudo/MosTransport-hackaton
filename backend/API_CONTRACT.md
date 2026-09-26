@@ -100,6 +100,7 @@
   "name": "elderly_anxious",         // id пассажира
   "language": "ru",                  // ru | en
   "scenario": "Пассажир задыхается", // заголовок сценария
+  "content_validation_status": "draft", // draft | approved; blocked не запускается
   "opening": "Пассажир хватается за грудь...",
   "loyalty": 50,
   "safety": 50,
@@ -195,6 +196,8 @@
 ### POST `/api/session/start`
 
 Создаёт смену и **первую** ситуацию; остальные кладёт в `pending_situations`.
+В `POINTS_NAMESPACE=demo` допускаются `draft` и `approved` сценарии. В других
+пространствах доступны только `approved`; если их нет, ответ `409`.
 Ответ `201`:
 
 ```json
@@ -419,7 +422,8 @@
 ### POST `/admin/sessions/{id}/approve`
 
 Помечает завершённую сессию `validation_status = approved`. Активная сессия
-возвращает `409`, несуществующая — `404`. Ответ `200`:
+возвращает `409`, несуществующая — `404`. Сессия с `draft`/`blocked` контентом
+возвращает `409` и не становится утверждённым результатом. Ответ `200`:
 
 ```json
 { "session_id": "uuid", "validation_status": "approved" }
