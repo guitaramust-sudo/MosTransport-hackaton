@@ -1,0 +1,20 @@
+{
+  "source_vertices": 31752,
+  "bones": 20,
+  "actions": [
+    "Idle",
+    "Walk"
+  ],
+  "blend_loop_gap_m": 0.0,
+  "glb_loop_gap_m": 0.0,
+  "glb_midcycle_vertex_motion_m": 0.14756355844613625,
+  "walk_action_frames": [
+    0.0,
+    24.0
+  ],
+  "left_foot_early_stance_range_m": 3.725290298461914e-08,
+  "lowest_sampled_vertex_z_m": 0.0017759044421836734,
+  "root_motion": false,
+  "materials": 1,
+  "texture_images": 3
+}
