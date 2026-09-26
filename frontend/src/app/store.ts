@@ -13,6 +13,7 @@ interface AppState {
   loyalty: number
   score: number
   actions: ActionRecord[]
+  resolvedEventIds: string[]
 }
 
 const initialState: AppState = {
@@ -24,6 +25,7 @@ const initialState: AppState = {
   loyalty: 84,
   score: 1240,
   actions: [],
+  resolvedEventIds: [],
 }
 
 const appSlice = createSlice({
@@ -40,8 +42,16 @@ const appSlice = createSlice({
       state.safety = 92
       state.loyalty = 84
       state.actions = []
+      state.resolvedEventIds = []
       state.previousScreen = state.screen
       state.screen = 'simulation'
+    },
+    selectEvent(state, action: PayloadAction<number>) {
+      const scenario = scenarios.find((item) => item.id === state.scenarioId)
+      const event = scenario?.events[action.payload]
+      if (event && !state.resolvedEventIds.includes(event.id)) {
+        state.eventIndex = action.payload
+      }
     },
     makeChoice(state, action: PayloadAction<ScenarioChoice>) {
       const scenario = scenarios.find((item) => item.id === state.scenarioId)
@@ -59,9 +69,11 @@ const appSlice = createSlice({
         loyalty: action.payload.loyalty,
         competency: action.payload.competency,
       })
+      state.resolvedEventIds.push(event.id)
 
-      if (state.eventIndex + 1 < (scenario?.events.length ?? 0)) {
-        state.eventIndex += 1
+      const nextIndex = scenario?.events.findIndex((item) => !state.resolvedEventIds.includes(item.id)) ?? -1
+      if (nextIndex >= 0) {
+        state.eventIndex = nextIndex
       } else {
         state.previousScreen = state.screen
         state.screen = 'debrief'
@@ -70,7 +82,7 @@ const appSlice = createSlice({
   },
 })
 
-export const { navigate, startScenario, makeChoice } = appSlice.actions
+export const { navigate, startScenario, selectEvent, makeChoice } = appSlice.actions
 export const store = configureStore({ reducer: { app: appSlice.reducer } })
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch

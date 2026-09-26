@@ -13,6 +13,9 @@
     "android": {
       "package": "ru.moscowtransport.vsmtrainer",
       "predictiveBackGestureEnabled": false
-    }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }

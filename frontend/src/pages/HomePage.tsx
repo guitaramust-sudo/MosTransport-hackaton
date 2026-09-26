@@ -1,6 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { navigate, startScenario, useAppDispatch, useAppSelector } from '../app/store'
 import { ScenarioCard } from '../components/ScenarioCard'
+import { ModelStage } from '../components/ModelStage'
 import { scenarios } from '../data/scenarios'
 import { colors, radius, shadow } from '../helpers/theme'
 
@@ -20,6 +21,8 @@ export function HomePage() {
           <View style={styles.online} />
         </Pressable>
       </View>
+
+      <ModelStage />
 
       <View style={styles.hero}>
         <View style={styles.trainLine} />
