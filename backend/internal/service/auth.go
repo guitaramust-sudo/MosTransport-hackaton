@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -34,34 +33,19 @@ func isUniqueViolation(err error) bool {
 }
 
 type AuthService struct {
-	store       repo.Store
-	jwtSecret   []byte
-	accessTTL   time.Duration
-	refreshTTL  time.Duration
-	adminEmails map[string]bool
+	store      repo.Store
+	jwtSecret  []byte
+	accessTTL  time.Duration
+	refreshTTL time.Duration
 }
 
-func NewAuthService(store repo.Store, jwtSecret string, accessTTL, refreshTTL time.Duration, adminEmails []string) *AuthService {
-	admins := map[string]bool{}
-	for _, email := range adminEmails {
-		admins[strings.ToLower(strings.TrimSpace(email))] = true
-	}
+func NewAuthService(store repo.Store, jwtSecret string, accessTTL, refreshTTL time.Duration) *AuthService {
 	return &AuthService{
-		store:       store,
-		jwtSecret:   []byte(jwtSecret),
-		accessTTL:   accessTTL,
-		refreshTTL:  refreshTTL,
-		adminEmails: admins,
+		store:      store,
+		jwtSecret:  []byte(jwtSecret),
+		accessTTL:  accessTTL,
+		refreshTTL: refreshTTL,
 	}
-}
-
-// roleFor returns the role encoded into a player's token. Users listed in
-// ADMIN_EMAILS are granted the admin role.
-func (s *AuthService) roleFor(email string) string {
-	if s.adminEmails[strings.ToLower(strings.TrimSpace(email))] {
-		return domain.RoleAdmin
-	}
-	return domain.RoleUser
 }
 
 type TokenPair struct {
@@ -89,9 +73,7 @@ func (s *AuthService) Register(ctx context.Context, email, username, password st
 		return AuthResult{}, err
 	}
 
-	role := s.roleFor(email)
-	player.Role = role
-	tokens, err := s.issueTokens(ctx, player.ID, role)
+	tokens, err := s.issueTokens(ctx, player.ID, player.Role)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -107,9 +89,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (AuthRe
 		return AuthResult{}, ErrInvalidCreds
 	}
 
-	role := s.roleFor(player.Email)
-	player.Role = role
-	tokens, err := s.issueTokens(ctx, player.ID, role)
+	tokens, err := s.issueTokens(ctx, player.ID, player.Role)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -151,9 +131,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (AuthRes
 	if err != nil {
 		return AuthResult{}, err
 	}
-	role := s.roleFor(player.Email)
-	player.Role = role
-	tokens, err := s.issueTokens(ctx, playerID, role)
+	tokens, err := s.issueTokens(ctx, playerID, player.Role)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -204,5 +182,9 @@ func (s *AuthService) ParseAccess(tokenString string) (uuid.UUID, string, error)
 	if err != nil {
 		return uuid.Nil, "", ErrInvalidToken
 	}
-	return id, c.Role, nil
+	player, err := s.store.GetPlayerByID(context.Background(), id)
+	if err != nil || player.Role != c.Role {
+		return uuid.Nil, "", ErrInvalidToken
+	}
+	return id, player.Role, nil
 }

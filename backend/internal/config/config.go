@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -20,8 +19,6 @@ type Config struct {
 	JWTRefreshTTL time.Duration
 
 	LLMMode string // gigachat | mock
-
-	AdminEmails []string
 
 	GigaChatClientID     string
 	GigaChatClientSecret string
@@ -46,8 +43,6 @@ func Load() *Config {
 		JWTRefreshTTL: envDuration("JWT_REFRESH_TTL", 30*24*time.Hour),
 
 		LLMMode: env("LLM_MODE", "mock"),
-
-		AdminEmails: splitCSV(env("ADMIN_EMAILS", "")),
 
 		GigaChatClientID:     os.Getenv("GIGACHAT_CLIENT_ID"),
 		GigaChatClientSecret: os.Getenv("GIGACHAT_CLIENT_SECRET"),
@@ -108,18 +103,4 @@ func envBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
-}
-
-// splitCSV splits a comma-separated env value into trimmed, non-empty items.
-func splitCSV(v string) []string {
-	if v == "" {
-		return nil
-	}
-	var out []string
-	for _, item := range strings.Split(v, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
 }

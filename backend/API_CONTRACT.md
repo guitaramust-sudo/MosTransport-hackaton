@@ -7,7 +7,7 @@
 - Base URL: `http://localhost:8088` (docker) / `http://localhost:8080` (локально)
 - Формат: `application/json; charset=utf-8`
 - Аутентификация: заголовок `Authorization: Bearer <access_token>`
-- Роли: `user` (по умолчанию), `admin` (из `ADMIN_EMAILS`)
+- Роли: `user` (по умолчанию), `admin` (создаётся локальной командой `bootstrap-admin`)
 
 ---
 
@@ -474,7 +474,7 @@
 
 | Переменная | По умолчанию | Влияние |
 |---|---|---|
-| `ADMIN_EMAILS` | пусто | emails, получающие `role=admin` |
+| `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD` | — | используются только локальной командой `bootstrap-admin`; регистрация через API всегда создаёт `user` |
 | `POINTS_NAMESPACE` | `demo` | `leaderboard_eligible` (`true` только при `official`) |
 | `SITUATIONS_PER_SESSION` | `4` | число ситуаций в смене |
 | `SITUATION_TIMEOUT` | — | (устарело, таймер берётся из сценария `time_limit_sec`) |

@@ -63,7 +63,7 @@ func run() error {
 		return fmt.Errorf("unsupported LLM_MODE %q", cfg.LLMMode)
 	}
 
-	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.AdminEmails)
+	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	situations := service.NewSituationService(store, client, catalog)
 	h := &handler.Handlers{
 		Auth:      auth,
