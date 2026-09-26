@@ -138,25 +138,11 @@ export interface ActionRecord {
   loyalty: number;
   competency: string;
 }
-export interface Session { id: string; status: 'active' | 'finished'; created_at: string; finished_at: string | null }
-export interface SessionResponse { session: Session; situations: Situation[] }
-export interface Message { id: number; role: 'player' | 'passenger' | 'system'; content: string; created_at: string }
-export interface SituationResponse { situation: Situation; messages: Message[] }
-export interface TurnResult { reply: string; closed: boolean; status: string; outcome?: string }
-export interface SituationBreakdown {
-  situation_id: string
-  code: string
-  name: string
-  outcome: string
-  loyalty: number
-  safety: number
-  xp: number
-  remarks: Remark[]
+
+export interface GameQuest {
+  id: string
+  title: string
+  location: string
+  priority: 'critical' | 'normal'
+  seatIndex: number
 }
-export interface Breakdown {
-  session_id: string
-  total_xp: number
-  competencies_xp: Record<string, number>
-  situations: SituationBreakdown[]
-}
-export interface Profile { player: Player; competencies: Array<{ competency_id: number; xp: number }> }

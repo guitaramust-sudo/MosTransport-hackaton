@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StatusBar } from 'expo-status-bar'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { Provider } from 'react-redux'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { store } from './src/app/store'
 import { RootNavigator } from './src/components/RootNavigator'
 import { preloadGameAssets } from './src/helpers/gameAssets'
@@ -43,12 +44,14 @@ export default function App() {
   }
 
   return (
-    <Provider store={store}>
-      <QueryClientProvider client={queryClient}>
-        <StatusBar style="dark" />
-        <RootNavigator />
-      </QueryClientProvider>
-    </Provider>
+    <SafeAreaProvider>
+      <Provider store={store}>
+        <QueryClientProvider client={queryClient}>
+          <StatusBar style="dark" />
+          <RootNavigator />
+        </QueryClientProvider>
+      </Provider>
+    </SafeAreaProvider>
   )
 }
 

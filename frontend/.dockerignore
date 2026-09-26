@@ -1,0 +1,14 @@
+node_modules
+.expo
+.debug-bundle
+dist
+dist-web
+web-build
+android
+.git
+.gitignore
+*.log
+*.local
+.DS_Store
+.idea
+.vscode

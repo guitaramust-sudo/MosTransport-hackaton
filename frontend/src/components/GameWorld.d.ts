@@ -1,10 +1,10 @@
-import type { ScenarioEvent } from '../types'
+import type { GameQuest } from '../types'
 
 interface GameWorldProps {
   targetEventId: string
   moveRequest: number
-  onArrive: () => void
-  quests: Array<Pick<ScenarioEvent, 'id' | 'title' | 'location' | 'priority'>>
+  onArrive: (questId: string) => void
+  quests: GameQuest[]
   onQuestPress: (questId: string) => void
 }
 

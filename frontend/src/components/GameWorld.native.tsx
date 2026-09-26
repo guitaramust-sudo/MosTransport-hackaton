@@ -5,7 +5,7 @@ import { OrthographicCamera, useAnimations, useGLTF } from '@react-three/drei/na
 import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
 import { colors } from '../helpers/theme'
-import type { ScenarioEvent } from '../types'
+import type { GameQuest } from '../types'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -16,18 +16,21 @@ const AISLE_MAX_X = 0.78
 const AISLE_MIN_Z = -6.2
 const AISLE_MAX_Z = 6.2
 const FLOOR_Y = 0.245
-const questAnchors: Record<string, { x: number; y: number; z: number }> = {
-  medical: { x: -0.32, y: 1.5, z: 3.6 },
-  climate: { x: 1.26, y: 1.5, z: -3.6 },
-}
-const eventTargets: Record<string, number> = { medical: 3.6, climate: -3.6 }
+const questAnchors = [
+  { x: -0.32, y: 1.5, z: 3.6 },
+  { x: 1.26, y: 1.5, z: 1.2 },
+  { x: -0.32, y: 1.5, z: -1.2 },
+  { x: 1.26, y: 1.5, z: -3.6 },
+]
 
-type GameQuest = Pick<ScenarioEvent, 'id' | 'title' | 'location' | 'priority'>
+function getQuestAnchor(quest?: GameQuest) {
+  return questAnchors[(quest?.seatIndex ?? 0) % questAnchors.length]
+}
 
 interface GameWorldProps {
   targetEventId: string
   moveRequest: number
-  onArrive: () => void
+  onArrive: (questId: string) => void
   quests: GameQuest[]
   onQuestPress: (questId: string) => void
 }
@@ -59,7 +62,7 @@ function QuestProjector({ quests, onProject }: {
     elapsed.current = 0
 
     const projected = quests.map((quest) => {
-      const anchor = questAnchors[quest.id] ?? { x: AISLE_X, y: 1.5, z: 0 }
+      const anchor = getQuestAnchor(quest)
       point.current.set(anchor.x, anchor.y, anchor.z).project(camera)
       const x = (point.current.x * 0.5 + 0.5) * size.width
       const y = (-point.current.y * 0.5 + 0.5) * size.height
@@ -80,7 +83,7 @@ function QuestProjector({ quests, onProject }: {
   return (
     <>
       {quests.map((quest) => {
-        const anchor = questAnchors[quest.id] ?? { x: AISLE_X, y: 1.5, z: 0 }
+        const anchor = getQuestAnchor(quest)
         return (
           <group key={quest.id} position={[anchor.x, 0.255, anchor.z]}>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -94,7 +97,7 @@ function QuestProjector({ quests, onProject }: {
   )
 }
 
-function World({ targetEventId, moveRequest, onArrive, playerPosition }: GameWorldProps & {
+function World({ targetEventId, moveRequest, onArrive, quests, playerPosition }: GameWorldProps & {
   playerPosition: MutableRefObject<PlayerPosition>
 }) {
   const wagon = useGLTF(wagonAsset) as unknown as { scene: Group }
@@ -135,7 +138,8 @@ function World({ targetEventId, moveRequest, onArrive, playerPosition }: GameWor
 
   useEffect(() => {
     if (moveRequest === 0) return
-    startMoving(AISLE_X, eventTargets[targetEventId] ?? 0, true)
+    const anchor = getQuestAnchor(quests.find((quest) => quest.id === targetEventId))
+    startMoving(AISLE_X, anchor.z, true)
   }, [actions, moveRequest, targetEventId])
 
   useFrame((_, delta) => {
@@ -166,7 +170,7 @@ function World({ targetEventId, moveRequest, onArrive, playerPosition }: GameWor
       actions.Idle?.reset().fadeIn(0.18).play()
       if (!arrivalSent.current) {
         arrivalSent.current = true
-        onArrive()
+        onArrive(targetEventId)
       }
     }
   })
