@@ -23,6 +23,7 @@ import (
 	appmiddleware "github.com/mostransport/vsm-trainer/internal/middleware"
 	"github.com/mostransport/vsm-trainer/internal/repo/postgres"
 	"github.com/mostransport/vsm-trainer/internal/service"
+	"github.com/mostransport/vsm-trainer/internal/simulation"
 )
 
 func main() {
@@ -40,6 +41,10 @@ func run() error {
 	catalog, err := content.Load()
 	if err != nil {
 		return fmt.Errorf("load content: %w", err)
+	}
+	simTemplate, err := simulation.Load()
+	if err != nil {
+		return fmt.Errorf("load simulation template: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,11 +71,12 @@ func run() error {
 	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	situations := service.NewSituationService(store, client, catalog)
 	h := &handler.Handlers{
-		Auth:      auth,
-		Profile:   service.NewProfileService(store),
-		Session:   service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
-		Situation: situations,
-		Admin:     service.NewAdminService(store, catalog),
+		Auth:       auth,
+		Profile:    service.NewProfileService(store),
+		Session:    service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
+		Situation:  situations,
+		Admin:      service.NewAdminService(store, catalog),
+		Simulation: service.NewSimulationService(store, simTemplate, cfg.PointsNamespace),
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -141,6 +147,9 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Get("/leaderboard", h.GetLeaderboard)
 		r.Get("/leaderboards", h.GetScopedLeaderboard)
 		r.Post("/session/start", h.StartSession)
+		r.Post("/session/simulations", h.StartSimulation)
+		r.Get("/session/simulations/{id}", h.GetSimulation)
+		r.Post("/session/simulations/{id}/actions", h.SimulationAction)
 		r.Get("/session/{id}", h.GetSession)
 		r.Post("/session/{id}/finish", h.FinishSession)
 		r.Get("/situation/{id}", h.GetSituation)

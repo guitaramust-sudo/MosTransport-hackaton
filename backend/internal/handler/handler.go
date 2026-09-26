@@ -9,11 +9,12 @@ import (
 
 // Handlers bundles all HTTP handlers and their dependencies.
 type Handlers struct {
-	Auth      *service.AuthService
-	Profile   *service.ProfileService
-	Session   *service.SessionService
-	Situation *service.SituationService
-	Admin     *service.AdminService
+	Auth       *service.AuthService
+	Profile    *service.ProfileService
+	Session    *service.SessionService
+	Situation  *service.SituationService
+	Admin      *service.AdminService
+	Simulation *service.SimulationService
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

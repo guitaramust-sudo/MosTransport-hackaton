@@ -193,6 +193,36 @@
 
 ## 4. Смена (сессия)
 
+### Демонстрационная смена с ветвлением
+
+`POST /api/session/simulations` создаёт новую смену в `POINTS_NAMESPACE=demo`.
+`GET /api/session/simulations/{id}` возвращает её текущее состояние. Ответ:
+
+```json
+{
+  "run": {
+    "id": "uuid", "scenario_id": "demo_service_branch",
+    "scenario_version": "1.0.0", "content_validation_status": "draft",
+    "state_version": 0, "status": "active", "loyalty": 80, "safety": 100,
+    "path": []
+  },
+  "event": {
+    "id": "service_request", "text": "Пассажир просит услугу...",
+    "choices": [{"id": "check_availability", "text": "Проверить наличие прежде чем обещать"}]
+  }
+}
+```
+
+`POST /api/session/simulations/{id}/actions` принимает
+`{"command_id":"uuid","expected_state_version":0,"choice_id":"check_availability"}`.
+Ответ `200` имеет ту же форму с новой версией и следующим событием. Повтор того
+же `command_id` возвращает прежний результат; новая команда со старой версией
+получает `409`. Невозможный выбор получает `400`, чужая смена — `404`.
+Правила выбора и внутренние флаги остаются на сервере. Конфигурация сценария
+закрепляется в записи смены, поэтому изменение файла не меняет уже начатый рейс.
+Это пока отдельный демонстрационный путь: движение, параллельные события и
+полный debrief ещё не реализованы.
+
 ### POST `/api/session/start`
 
 Создаёт смену и **первую** ситуацию; остальные кладёт в `pending_situations`.

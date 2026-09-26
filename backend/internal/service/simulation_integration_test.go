@@ -1,0 +1,110 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/mostransport/vsm-trainer/internal/repo"
+	"github.com/mostransport/vsm-trainer/internal/repo/postgres"
+	"github.com/mostransport/vsm-trainer/internal/simulation"
+)
+
+func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	ctx := context.Background()
+	store, err := postgres.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	player, err := store.CreatePlayer(ctx, fmt.Sprintf("sim-%s@example.invalid", uuid.NewString()), "sim-test", "unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), url)
+		if err == nil {
+			_, _ = conn.Exec(context.Background(), `DELETE FROM players WHERE id = $1`, player.ID)
+			_ = conn.Close(context.Background())
+		}
+	})
+	template, err := simulation.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSimulationService(store, template, "demo")
+	first, err := svc.Start(ctx, player.ID)
+	if err != nil || first.Event == nil || len(first.Event.Choices) != 2 {
+		t.Fatalf("start: %+v, %v", first, err)
+	}
+	raw, _ := json.Marshal(first)
+	if stringContainsAny(string(raw), "availability_checked", "loyalty_delta", "explanation") {
+		t.Fatalf("private choice effects leaked: %s", raw)
+	}
+	commandID := uuid.New()
+	// A running session keeps its compiled template even if a later deploy
+	// changes the current catalog.
+	svc.template.Events[0].Choices[0].NextEvent = "unconfirmed_promise"
+	checked, err := svc.Action(ctx, player.ID, first.Run.ID, commandID, 0, "check_availability")
+	if err != nil || checked.Run.StateVersion != 1 || checked.Event.ID != "confirmed_request" || checked.Run.Loyalty != 83 {
+		t.Fatalf("checked path: %+v, %v", checked, err)
+	}
+	repeated, err := svc.Action(ctx, player.ID, first.Run.ID, commandID, 0, "promise_immediately")
+	if err != nil || repeated.Run.StateVersion != 1 || repeated.Event.ID != "confirmed_request" || repeated.Run.Loyalty != 83 {
+		t.Fatalf("duplicate command changed state: %+v, %v", repeated, err)
+	}
+	if _, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 0, "explain_next_step"); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("stale version: %v", err)
+	}
+	completed, err := svc.Action(ctx, player.ID, first.Run.ID, uuid.New(), 1, "explain_next_step")
+	if err != nil || completed.Run.Status != "finished" || completed.Run.Loyalty != 87 || completed.Event != nil {
+		t.Fatalf("completion: %+v, %v", completed, err)
+	}
+	svc.template.Events[0].Choices[0].NextEvent = "confirmed_request"
+	second, err := svc.Start(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promised, err := svc.Action(ctx, player.ID, second.Run.ID, uuid.New(), 0, "promise_immediately")
+	if err != nil || promised.Event.ID != "unconfirmed_promise" || promised.Run.Loyalty != 76 {
+		t.Fatalf("second branch: %+v, %v", promised, err)
+	}
+	if _, err := svc.Get(ctx, uuid.New(), first.Run.ID); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("other player read simulation: %v", err)
+	}
+	third, err := svc.Start(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	for _, choice := range []string{"check_availability", "promise_immediately"} {
+		go func(choiceID string) {
+			_, actionErr := svc.Action(ctx, player.ID, third.Run.ID, uuid.New(), 0, choiceID)
+			results <- actionErr
+		}(choice)
+	}
+	firstErr, secondErr := <-results, <-results
+	if (firstErr == nil) == (secondErr == nil) || (firstErr != nil && !errors.Is(firstErr, repo.ErrConflict)) || (secondErr != nil && !errors.Is(secondErr, repo.ErrConflict)) {
+		t.Fatalf("concurrent commands: %v, %v", firstErr, secondErr)
+	}
+}
+
+func stringContainsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}

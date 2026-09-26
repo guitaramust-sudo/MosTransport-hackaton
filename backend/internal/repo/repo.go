@@ -20,6 +20,14 @@ type CompetencyAward struct {
 	Evidence int
 }
 
+// SimulationStore is separate from the legacy dialogue store while clients
+// migrate to the branching flow. The callback executes under a row lock.
+type SimulationStore interface {
+	CreateSimulationRun(ctx context.Context, run domain.SimulationRun) (domain.SimulationRun, error)
+	GetSimulationRun(ctx context.Context, runID, playerID uuid.UUID) (domain.SimulationRun, error)
+	ApplySimulationCommand(ctx context.Context, runID, playerID, commandID uuid.UUID, expectedVersion int, apply func(domain.SimulationRun) (domain.SimulationRun, error)) (domain.SimulationRun, error)
+}
+
 // LockedSituation is a transaction-scoped view used while closing a situation.
 // The row lock freezes the dialog and escalations until scoring is saved.
 type LockedSituation interface {
