@@ -210,6 +210,18 @@ func TestSimulationTimerClosesServiceWindowOnce(t *testing.T) {
 	if err != nil || !result.TimedOut || result.SessionPass || len(result.Debrief) != 6 || result.Debrief[0].EffectID != "service_window_closed" {
 		t.Fatalf("timeout result: %+v, %v", result, err)
 	}
+	if result.LeaderboardPointsDelta != 0 || result.LeaderboardEligible {
+		t.Fatalf("timeout earned leaderboard points: %+v", result)
+	}
+	profile, err := NewProfileService(store).Get(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, achievement := range profile.Achievements {
+		if achievement == "first_complete" {
+			t.Fatal("failed run earned first_complete")
+		}
+	}
 	if len(result.Debrief[2].BetterOptions) != 1 || !strings.Contains(result.Debrief[2].BetterOptions[0], "билетов") {
 		t.Fatalf("missing better action after poor choice: %+v", result.Debrief[2])
 	}

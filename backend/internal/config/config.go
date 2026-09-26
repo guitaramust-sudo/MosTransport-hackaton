@@ -57,6 +57,9 @@ func Load() *Config {
 }
 
 func (c *Config) Validate() error {
+	if c.PointsNamespace != "" && c.PointsNamespace != "demo" && c.PointsNamespace != "official" {
+		return fmt.Errorf("POINTS_NAMESPACE must be demo or official")
+	}
 	if c.AppEnv != "development" && c.AppEnv != "production" {
 		return fmt.Errorf("APP_ENV must be development or production")
 	}

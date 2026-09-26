@@ -199,7 +199,7 @@
   "group_id": "depot-1",
   "group_size": 5,
   "entries": [
-    { "rank": 1, "player_id": "uuid", "username": "Иван", "leaderboard_points_total": 20, "percentile": 75 }
+    { "rank": 1, "player_id": "uuid", "username": "Иван", "leaderboard_points_total": 20, "percentile": 90 }
   ]
 }
 ```

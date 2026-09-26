@@ -81,8 +81,10 @@ func (s *Store) FinalizeSimulationRewards(ctx context.Context, run domain.Simula
 			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO achievements (player_id, code) VALUES ($1, 'first_complete') ON CONFLICT DO NOTHING`, run.PlayerID); err != nil {
-		return err
+	if current.Passed {
+		if _, err := tx.Exec(ctx, `INSERT INTO achievements (player_id, code) VALUES ($1, 'first_complete') ON CONFLICT DO NOTHING`, run.PlayerID); err != nil {
+			return err
+		}
 	}
 	for _, entry := range current.ActionLog {
 		if entry.EffectID == "cue_discovered" {

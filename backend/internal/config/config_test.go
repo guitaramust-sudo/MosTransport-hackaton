@@ -15,3 +15,9 @@ func TestProductionRejectsInsecureSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRejectsUnknownPointsNamespace(t *testing.T) {
+	if err := (&Config{AppEnv: "development", PointsNamespace: "other"}).Validate(); err == nil {
+		t.Fatal("unknown points namespace was accepted")
+	}
+}
