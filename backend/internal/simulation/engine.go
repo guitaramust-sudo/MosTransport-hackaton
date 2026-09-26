@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/mostransport/vsm-trainer/internal/domain"
 )
@@ -51,7 +54,15 @@ type Template struct {
 	StartEvents      []string `json:"start_events"`
 	StartLocation    string   `json:"start_location"`
 	Edges            []Edge   `json:"edges"`
+	Timer            *Timer   `json:"timer,omitempty"`
 	Events           []Event  `json:"events"`
+}
+
+type Timer struct {
+	EventID          string `json:"event_id"`
+	DurationS        int    `json:"duration_s"`
+	TimeoutNextEvent string `json:"timeout_next_event"`
+	Explanation      string `json:"explanation"`
 }
 
 func Load() (Template, error) {
@@ -125,6 +136,9 @@ func (t Template) Validate() error {
 			choices[choice.ID] = true
 		}
 	}
+	if t.Timer != nil && (!events[t.Timer.EventID] || !events[t.Timer.TimeoutNextEvent] || t.Timer.DurationS <= 0 || t.Timer.Explanation == "") {
+		return errors.New("invalid timer configuration")
+	}
 	return nil
 }
 
@@ -138,10 +152,47 @@ func (t Template) Event(id string) (Event, bool) {
 }
 
 type Command struct {
-	ActionID string
-	Target   string
-	EventID  string
-	ChoiceID string
+	CommandID uuid.UUID
+	ActionID  string
+	Target    string
+	EventID   string
+	ChoiceID  string
+}
+
+func (t Template) ApplyDue(run domain.SimulationRun, now time.Time) (domain.SimulationRun, bool) {
+	if t.Timer == nil || run.TimedOut || run.Status != "active" {
+		return run, false
+	}
+	if run.GameTimeS < t.Timer.DurationS && (run.DeadlineAt == nil || !now.After(*run.DeadlineAt)) {
+		return run, false
+	}
+	for i, id := range run.ActiveEventIDs {
+		if id != t.Timer.EventID {
+			continue
+		}
+		run.ActiveEventIDs[i] = t.Timer.TimeoutNextEvent
+		if run.CurrentEventID == id {
+			run.CurrentEventID = t.Timer.TimeoutNextEvent
+		}
+		run.TimedOut = true
+		run.DeadlineAt = nil
+		if run.Flags == nil {
+			run.Flags = map[string]bool{}
+		}
+		run.Flags["service_window_closed"] = true
+		if run.GameTimeS < t.Timer.DurationS {
+			run.GameTimeS = t.Timer.DurationS
+		}
+		run.ActionLog = append(run.ActionLog, domain.SimulationLogEntry{
+			EventID: id, ActionID: "timeout", EffectID: "service_window_closed",
+			Explanation: t.Timer.Explanation, AtGameTimeS: run.GameTimeS,
+			LoyaltyBefore: run.Loyalty, LoyaltyAfter: run.Loyalty,
+			SafetyBefore: run.Safety, SafetyAfter: run.Safety,
+		})
+		return run, true
+	}
+	run.DeadlineAt = nil
+	return run, false
 }
 
 func (t Template) Apply(run domain.SimulationRun, command Command) (domain.SimulationRun, error) {
@@ -151,6 +202,31 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 	if len(run.ActiveEventIDs) == 0 && run.CurrentEventID != "" {
 		run.ActiveEventIDs = []string{run.CurrentEventID}
 	}
+	if t.Timer != nil && !run.TimedOut && run.GameTimeS < t.Timer.DurationS {
+		cost := 0
+		switch command.ActionID {
+		case "move_to":
+			for _, edge := range t.Edges {
+				if (edge.From == run.Location && edge.To == command.Target) || (edge.To == run.Location && edge.From == command.Target) {
+					cost = edge.TravelS
+				}
+			}
+		case "inspect":
+			cost = 5
+		case "", "choose":
+			cost = 6
+		}
+		if run.GameTimeS+cost > t.Timer.DurationS {
+			for _, id := range run.ActiveEventIDs {
+				if id == t.Timer.EventID {
+					run.GameTimeS = t.Timer.DurationS
+					if due, changed := t.ApplyDue(run, time.Time{}); changed {
+						return due, nil
+					}
+				}
+			}
+		}
+	}
 	switch command.ActionID {
 	case "move_to":
 		for _, edge := range t.Edges {
@@ -158,6 +234,9 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 				run.Location = command.Target
 				run.GameTimeS += edge.TravelS
 				run.Path = append(run.Path, "move_to:"+command.Target)
+				run.ActionLog = append(run.ActionLog, domain.SimulationLogEntry{CommandID: command.CommandID,
+					ActionID: "move_to", EffectID: "location_changed", Explanation: "Переход в другую зону занял игровое время.",
+					AtGameTimeS: run.GameTimeS, LoyaltyBefore: run.Loyalty, LoyaltyAfter: run.Loyalty, SafetyBefore: run.Safety, SafetyAfter: run.Safety})
 				return run, nil
 			}
 		}
@@ -179,6 +258,9 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 		}
 		run.GameTimeS += 5
 		run.Path = append(run.Path, "inspect:"+run.Location)
+		run.ActionLog = append(run.ActionLog, domain.SimulationLogEntry{CommandID: command.CommandID,
+			ActionID: "inspect", EffectID: "cue_discovered", Explanation: "Осмотр раскрыл наблюдаемый сигнал в текущей зоне.",
+			AtGameTimeS: run.GameTimeS, LoyaltyBefore: run.Loyalty, LoyaltyAfter: run.Loyalty, SafetyBefore: run.Safety, SafetyAfter: run.Safety})
 		return run, nil
 	case "", "choose":
 	default:
@@ -217,10 +299,18 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 		for key, value := range choice.Effects {
 			run.Flags[key] = value
 		}
+		beforeLoyalty, beforeSafety := run.Loyalty, run.Safety
 		run.Loyalty = clamp(run.Loyalty + choice.LoyaltyDelta)
 		run.Safety = clamp(run.Safety + choice.SafetyDelta)
 		run.GameTimeS += 6
 		run.Path = append(run.Path, event.ID+":"+choice.ID)
+		run.ActionLog = append(run.ActionLog, domain.SimulationLogEntry{CommandID: command.CommandID,
+			EventID: event.ID, ActionID: "choose", EffectID: choice.ID, Explanation: choice.Explanation,
+			AtGameTimeS: run.GameTimeS, LoyaltyBefore: beforeLoyalty, LoyaltyAfter: run.Loyalty,
+			SafetyBefore: beforeSafety, SafetyAfter: run.Safety})
+		if t.Timer != nil && event.ID == t.Timer.EventID {
+			run.DeadlineAt = nil
+		}
 		if choice.NextEvent == "" {
 			run.ActiveEventIDs = append(run.ActiveEventIDs[:index], run.ActiveEventIDs[index+1:]...)
 		} else {

@@ -26,6 +26,8 @@ type SimulationStore interface {
 	CreateSimulationRun(ctx context.Context, run domain.SimulationRun) (domain.SimulationRun, error)
 	GetSimulationRun(ctx context.Context, runID, playerID uuid.UUID) (domain.SimulationRun, error)
 	ApplySimulationCommand(ctx context.Context, runID, playerID, commandID uuid.UUID, expectedVersion int, apply func(domain.SimulationRun) (domain.SimulationRun, error)) (domain.SimulationRun, error)
+	AdvanceSimulationTimer(ctx context.Context, runID, playerID uuid.UUID, apply func(domain.SimulationRun) (domain.SimulationRun, bool)) (domain.SimulationRun, error)
+	ListDueSimulationRuns(ctx context.Context, now time.Time) ([]domain.SimulationDueRun, error)
 }
 
 // LockedSituation is a transaction-scoped view used while closing a situation.

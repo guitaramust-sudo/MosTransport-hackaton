@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,6 +21,8 @@ type SimulationService struct {
 	namespace string
 }
 
+var ErrSimulationActive = errors.New("simulation is still active")
+
 type SimulationView struct {
 	Run            SimulationStateView   `json:"run"`
 	Event          *SimulationEventView  `json:"event,omitempty"`
@@ -25,17 +31,19 @@ type SimulationView struct {
 }
 
 type SimulationStateView struct {
-	ID                      uuid.UUID `json:"id"`
-	ScenarioID              string    `json:"scenario_id"`
-	ScenarioVersion         string    `json:"scenario_version"`
-	ContentValidationStatus string    `json:"content_validation_status"`
-	StateVersion            int       `json:"state_version"`
-	Status                  string    `json:"status"`
-	Loyalty                 int       `json:"loyalty"`
-	Safety                  int       `json:"safety"`
-	Path                    []string  `json:"path"`
-	Location                string    `json:"location"`
-	GameTimeS               int       `json:"game_time_s"`
+	ID                      uuid.UUID  `json:"id"`
+	ScenarioID              string     `json:"scenario_id"`
+	ScenarioVersion         string     `json:"scenario_version"`
+	ContentValidationStatus string     `json:"content_validation_status"`
+	StateVersion            int        `json:"state_version"`
+	Status                  string     `json:"status"`
+	Loyalty                 int        `json:"loyalty"`
+	Safety                  int        `json:"safety"`
+	Path                    []string   `json:"path"`
+	Location                string     `json:"location"`
+	GameTimeS               int        `json:"game_time_s"`
+	DeadlineAt              *time.Time `json:"deadline_at,omitempty"`
+	TimedOut                bool       `json:"timed_out"`
 }
 
 type SimulationChoiceView struct {
@@ -62,12 +70,18 @@ func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (Simu
 	if err != nil {
 		return SimulationView{}, err
 	}
+	now := time.Now().UTC()
+	var deadline *time.Time
+	if s.template.Timer != nil {
+		due := now.Add(time.Duration(s.template.Timer.DurationS) * time.Second)
+		deadline = &due
+	}
 	run, err := s.store.CreateSimulationRun(ctx, domain.SimulationRun{
 		PlayerID: playerID, ScenarioID: s.template.ID, ScenarioVersion: s.template.Version,
 		Status: "active", CurrentEventID: s.template.StartEvent,
 		ActiveEventIDs: append([]string(nil), s.template.StartEvents...), ObservedEvents: map[string]bool{},
 		Location: s.template.StartLocation, Flags: map[string]bool{}, Loyalty: 80, Safety: 100,
-		Path: []string{}, TemplateSnapshot: snapshot,
+		Path: []string{}, StartedAt: now, DeadlineAt: deadline, ActionLog: []domain.SimulationLogEntry{}, TemplateSnapshot: snapshot,
 	})
 	if err != nil {
 		return SimulationView{}, err
@@ -76,7 +90,7 @@ func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (Simu
 }
 
 func (s *SimulationService) Get(ctx context.Context, playerID, runID uuid.UUID) (SimulationView, error) {
-	run, err := s.store.GetSimulationRun(ctx, runID, playerID)
+	run, err := s.advanceTimer(ctx, playerID, runID, time.Now())
 	if err != nil {
 		return SimulationView{}, err
 	}
@@ -88,18 +102,121 @@ func (s *SimulationService) Action(ctx context.Context, playerID, runID, command
 }
 
 func (s *SimulationService) ActionCommand(ctx context.Context, playerID, runID, commandID uuid.UUID, version int, command simulation.Command) (SimulationView, error) {
+	if _, err := s.advanceTimer(ctx, playerID, runID, time.Now()); err != nil {
+		return SimulationView{}, err
+	}
+	command.CommandID = commandID
 	run, err := s.store.ApplySimulationCommand(ctx, runID, playerID, commandID, version,
 		func(current domain.SimulationRun) (domain.SimulationRun, error) {
 			template, err := s.templateFor(current)
 			if err != nil {
 				return current, err
 			}
-			return template.Apply(current, command)
+			if due, changed := template.ApplyDue(current, time.Now()); changed {
+				return due, nil
+			}
+			next, err := template.Apply(current, command)
+			if err == nil && next.Status == "finished" && current.Status != "finished" {
+				now := time.Now().UTC()
+				next.FinishedAt = &now
+			}
+			return next, err
 		})
 	if err != nil {
 		return SimulationView{}, err
 	}
 	return s.view(run)
+}
+
+type SimulationDebriefEntry struct {
+	domain.SimulationLogEntry
+	BetterOptions []string `json:"better_options"`
+}
+
+type SimulationResult struct {
+	SessionID          uuid.UUID                `json:"session_id"`
+	ScenarioVersion    string                   `json:"scenario_version"`
+	ScoringRuleVersion string                   `json:"scoring_rule_version"`
+	ValidationStatus   string                   `json:"validation_status"`
+	CompletedAt        *time.Time               `json:"completed_at"`
+	WorldSafetyCurrent int                      `json:"world_safety_current"`
+	SessionSafetyScore int                      `json:"session_safety_score"`
+	Loyalty            int                      `json:"loyalty"`
+	TimedOut           bool                     `json:"timed_out"`
+	SessionPass        bool                     `json:"session_pass"`
+	ActionLogHash      string                   `json:"action_log_hash"`
+	Debrief            []SimulationDebriefEntry `json:"debrief"`
+}
+
+func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUID) (SimulationResult, error) {
+	run, err := s.advanceTimer(ctx, playerID, runID, time.Now())
+	if err != nil {
+		return SimulationResult{}, err
+	}
+	if run.Status != "finished" {
+		return SimulationResult{}, ErrSimulationActive
+	}
+	template, err := s.templateFor(run)
+	if err != nil {
+		return SimulationResult{}, err
+	}
+	raw, err := json.Marshal(run.ActionLog)
+	if err != nil {
+		return SimulationResult{}, err
+	}
+	negativeSafety := 0
+	debrief := make([]SimulationDebriefEntry, 0, len(run.ActionLog))
+	for _, entry := range run.ActionLog {
+		if entry.SafetyAfter < entry.SafetyBefore {
+			negativeSafety += entry.SafetyAfter - entry.SafetyBefore
+		}
+		row := SimulationDebriefEntry{SimulationLogEntry: entry, BetterOptions: []string{}}
+		if event, ok := template.Event(entry.EventID); ok {
+			var chosen *simulation.Choice
+			for i := range event.Choices {
+				if event.Choices[i].ID == entry.EffectID {
+					chosen = &event.Choices[i]
+					break
+				}
+			}
+			for _, choice := range event.Choices {
+				if entry.ActionID == "timeout" || (chosen != nil && choice.ID != entry.EffectID && (choice.SafetyDelta > chosen.SafetyDelta || (choice.SafetyDelta == chosen.SafetyDelta && choice.LoyaltyDelta > chosen.LoyaltyDelta))) {
+					row.BetterOptions = append(row.BetterOptions, choice.Text)
+				}
+			}
+		}
+		debrief = append(debrief, row)
+	}
+	safetyScore := clamp(100+negativeSafety, 0, 100)
+	return SimulationResult{SessionID: run.ID, ScenarioVersion: run.ScenarioVersion,
+		ScoringRuleVersion: "simulation-demo-v1", ValidationStatus: template.ValidationStatus,
+		CompletedAt: run.FinishedAt, WorldSafetyCurrent: run.Safety, SessionSafetyScore: safetyScore,
+		Loyalty: run.Loyalty, TimedOut: run.TimedOut,
+		SessionPass:   !run.TimedOut && safetyScore >= 90 && run.Safety >= 90 && run.Loyalty >= 60,
+		ActionLogHash: fmt.Sprintf("%x", sha256.Sum256(raw)), Debrief: debrief}, nil
+}
+
+func (s *SimulationService) advanceTimer(ctx context.Context, playerID, runID uuid.UUID, now time.Time) (domain.SimulationRun, error) {
+	return s.store.AdvanceSimulationTimer(ctx, runID, playerID, func(run domain.SimulationRun) (domain.SimulationRun, bool) {
+		template, err := s.templateFor(run)
+		if err != nil {
+			return run, false
+		}
+		return template.ApplyDue(run, now)
+	})
+}
+
+func (s *SimulationService) CloseExpired(ctx context.Context) error {
+	runs, err := s.store.ListDueSimulationRuns(ctx, time.Now())
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if _, err := s.advanceTimer(ctx, run.PlayerID, run.ID, time.Now()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SimulationService) templateFor(run domain.SimulationRun) (simulation.Template, error) {
@@ -119,7 +236,7 @@ func (s *SimulationService) view(run domain.SimulationRun) (SimulationView, erro
 		ID: run.ID, ScenarioID: run.ScenarioID, ScenarioVersion: run.ScenarioVersion,
 		ContentValidationStatus: template.ValidationStatus, StateVersion: run.StateVersion,
 		Status: run.Status, Loyalty: run.Loyalty, Safety: run.Safety, Path: run.Path,
-		Location: run.Location, GameTimeS: run.GameTimeS,
+		Location: run.Location, GameTimeS: run.GameTimeS, DeadlineAt: run.DeadlineAt, TimedOut: run.TimedOut,
 	}}
 	view.Events = []SimulationEventView{}
 	view.ObservableCues = []string{}

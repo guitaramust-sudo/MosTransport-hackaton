@@ -46,6 +46,26 @@ func (h *Handlers) GetSimulation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *Handlers) SimulationResult(w http.ResponseWriter, r *http.Request) {
+	playerID, _ := middleware.PlayerIDFromContext(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid simulation id")
+		return
+	}
+	result, err := h.Simulation.Result(r.Context(), playerID, id)
+	switch {
+	case errors.Is(err, repo.ErrNotFound):
+		writeError(w, http.StatusNotFound, "simulation not found")
+	case errors.Is(err, service.ErrSimulationActive):
+		writeError(w, http.StatusConflict, "simulation is still active")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal error")
+	default:
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
 type simulationActionRequest struct {
 	CommandID            uuid.UUID `json:"command_id"`
 	ExpectedStateVersion int       `json:"expected_state_version"`

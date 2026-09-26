@@ -204,7 +204,8 @@
     "id": "uuid", "scenario_id": "demo_service_branch",
     "scenario_version": "1.0.0", "content_validation_status": "draft",
     "state_version": 0, "status": "active", "loyalty": 80, "safety": 100,
-    "location": "passenger_zone", "game_time_s": 0, "path": []
+    "location": "passenger_zone", "game_time_s": 0,
+    "deadline_at": "2026-09-26T12:01:00Z", "timed_out": false, "path": []
   },
   "event": {
     "id": "service_request", "location": "passenger_zone",
@@ -233,8 +234,18 @@
 соседними зонами. Для выбора из нескольких задач можно передать `event_id` с
 `choice_id`. Каждая команда требует новый `command_id` и текущую версию.
 Движение, осмотр и выбор увеличивают `game_time_s` на сервере; их длительности
-пока являются демонстрационным балансом. Таймер с последствиями и полный
-debrief ещё не реализованы.
+пока являются демонстрационным балансом. Демонстрационный дедлайн `60 s`
+исполняется сервером и без запроса клиента: событие `service_request` становится
+`service_window_closed`, а `timed_out=true`. Выбор, который завершился бы после
+дедлайна, не отменяет timeout; клиент получает новое состояние и версию.
+
+`GET /api/session/simulations/{id}/result` доступен после закрытия всех задач
+(`409`, пока смена активна). Он возвращает `world_safety_current`, отдельный
+`session_safety_score`, `loyalty`, `session_pass`, `action_log_hash` и `debrief`.
+Каждая строка debrief содержит действие/причину, время, шкалы до/после,
+объяснение и более удачный выбор, если он был в конфигурации. Результат
+демонстрационный (`validation_status=draft`) и не является профессиональной
+аттестацией.
 
 ### POST `/api/session/start`
 

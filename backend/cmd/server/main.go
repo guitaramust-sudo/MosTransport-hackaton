@@ -70,13 +70,14 @@ func run() error {
 
 	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	situations := service.NewSituationService(store, client, catalog)
+	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace)
 	h := &handler.Handlers{
 		Auth:       auth,
 		Profile:    service.NewProfileService(store),
 		Session:    service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation:  situations,
 		Admin:      service.NewAdminService(store, catalog),
-		Simulation: service.NewSimulationService(store, simTemplate, cfg.PointsNamespace),
+		Simulation: simulationService,
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -96,6 +97,9 @@ func run() error {
 			case <-ticker.C:
 				if err := situations.CloseExpired(ctx); err != nil {
 					slog.Error("timer closer failed", "error", err)
+				}
+				if err := simulationService.CloseExpired(ctx); err != nil {
+					slog.Error("simulation timer closer failed", "error", err)
 				}
 			}
 		}
@@ -149,6 +153,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/session/start", h.StartSession)
 		r.Post("/session/simulations", h.StartSimulation)
 		r.Get("/session/simulations/{id}", h.GetSimulation)
+		r.Get("/session/simulations/{id}/result", h.SimulationResult)
 		r.Post("/session/simulations/{id}/actions", h.SimulationAction)
 		r.Get("/session/{id}", h.GetSession)
 		r.Post("/session/{id}/finish", h.FinishSession)

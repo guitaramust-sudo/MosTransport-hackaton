@@ -131,6 +131,22 @@
           "explanation": "Замеченная опасность осталась без реакции."
         }
       ]
+    },
+    {
+      "id": "service_window_closed",
+      "text": "Условная услуга больше недоступна; пассажиру нужно объяснить изменение.",
+      "location": "passenger_zone",
+      "choices": [
+        {
+          "id": "explain_closed_window",
+          "text": "Объяснить, что сценарное окно закрылось, и предложить доступную альтернативу",
+          "effects": {
+            "window_explained": true
+          },
+          "loyalty_delta": 2,
+          "explanation": "Игрок объяснил последствие пропущенного демонстрационного срока."
+        }
+      ]
     }
   ],
   "start_events": [
@@ -145,5 +161,11 @@
       "to": "luggage_zone",
       "travel_s": 8
     }
-  ]
+  ],
+  "timer": {
+    "event_id": "service_request",
+    "duration_s": 60,
+    "timeout_next_event": "service_window_closed",
+    "explanation": "Сценарное окно услуги закрылось до ответа. Это демонстрационный срок, не рабочий норматив ВСМ."
+  }
 }

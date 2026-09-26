@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -93,6 +94,10 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	if err != nil || completed.Run.Status != "finished" || completed.Event != nil {
 		t.Fatalf("completion: %+v, %v", completed, err)
 	}
+	result, err := svc.Result(ctx, player.ID, first.Run.ID)
+	if err != nil || !result.SessionPass || result.SessionSafetyScore != 100 || len(result.Debrief) != 6 || result.ActionLogHash == "" {
+		t.Fatalf("normal result: %+v, %v", result, err)
+	}
 	svc.template.Events[0].Choices[0].NextEvent = "confirmed_request"
 	second, err := svc.Start(ctx, player.ID)
 	if err != nil {
@@ -119,6 +124,93 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	firstErr, secondErr := <-results, <-results
 	if (firstErr == nil) == (secondErr == nil) || (firstErr != nil && !errors.Is(firstErr, repo.ErrConflict)) || (secondErr != nil && !errors.Is(secondErr, repo.ErrConflict)) {
 		t.Fatalf("concurrent commands: %v, %v", firstErr, secondErr)
+	}
+}
+
+func TestSimulationTimerClosesServiceWindowOnce(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	ctx := context.Background()
+	store, err := postgres.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	player, err := store.CreatePlayer(ctx, fmt.Sprintf("timer-%s@example.invalid", uuid.NewString()), "timer-test", "unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), url)
+		if err == nil {
+			_, _ = conn.Exec(context.Background(), `DELETE FROM players WHERE id = $1`, player.ID)
+			_ = conn.Close(context.Background())
+		}
+	})
+	template, err := simulation.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSimulationService(store, template, "demo")
+	started, err := svc.Start(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Run.DeadlineAt == nil {
+		t.Fatal("server deadline missing")
+	}
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	due := time.Now().Add(-time.Second)
+	if _, err := conn.Exec(ctx, `UPDATE simulation_runs SET deadline_at = $2, state = jsonb_set(state, '{deadline_at}', to_jsonb($3::text)) WHERE id = $1`, started.Run.ID, due, due.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CloseExpired(ctx); err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Get(ctx, player.ID, started.Run.ID)
+	if err != nil || !view.Run.TimedOut || view.Run.StateVersion != 1 || view.Event.ID != "service_window_closed" {
+		t.Fatalf("timer transition: %+v, %v", view, err)
+	}
+	if err := svc.CloseExpired(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again, err := svc.Get(ctx, player.ID, started.Run.ID)
+	if err != nil || again.Run.StateVersion != 1 {
+		t.Fatalf("timer repeated: %+v, %v", again, err)
+	}
+	if _, err := svc.Result(ctx, player.ID, started.Run.ID); !errors.Is(err, ErrSimulationActive) {
+		t.Fatalf("active result: %v", err)
+	}
+	for _, choice := range []struct{ event, id string }{{"service_window_closed", "explain_closed_window"}, {"seat_conflict", "dismiss_dispute"}} {
+		view, err = svc.ActionCommand(ctx, player.ID, started.Run.ID, uuid.New(), view.Run.StateVersion, simulation.Command{EventID: choice.event, ChoiceID: choice.id})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err = svc.ActionCommand(ctx, player.ID, started.Run.ID, uuid.New(), view.Run.StateVersion, simulation.Command{ActionID: "move_to", Target: "luggage_zone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = svc.ActionCommand(ctx, player.ID, started.Run.ID, uuid.New(), view.Run.StateVersion, simulation.Command{ActionID: "inspect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = svc.ActionCommand(ctx, player.ID, started.Run.ID, uuid.New(), view.Run.StateVersion, simulation.Command{EventID: "wet_floor", ChoiceID: "report_spill"})
+	if err != nil || view.Run.Status != "finished" {
+		t.Fatalf("finish after timeout: %+v, %v", view, err)
+	}
+	result, err := svc.Result(ctx, player.ID, started.Run.ID)
+	if err != nil || !result.TimedOut || result.SessionPass || len(result.Debrief) != 6 || result.Debrief[0].EffectID != "service_window_closed" {
+		t.Fatalf("timeout result: %+v, %v", result, err)
+	}
+	if len(result.Debrief[2].BetterOptions) != 1 || !strings.Contains(result.Debrief[2].BetterOptions[0], "билетов") {
+		t.Fatalf("missing better action after poor choice: %+v", result.Debrief[2])
 	}
 }
 
