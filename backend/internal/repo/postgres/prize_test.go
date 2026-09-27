@@ -64,7 +64,8 @@ func TestPrizeCreditBalanceExcludesExpiredRows(t *testing.T) {
 		playerID, expiredAwardedAt, expiredExpiresAt); err != nil {
 		t.Fatal(err)
 	}
-	activeExpiresAt := now.Add(2 * time.Hour)
+	// PostgreSQL timestamps keep microseconds, not Go's nanoseconds.
+	activeExpiresAt := now.Add(2 * time.Hour).Truncate(time.Microsecond)
 	if _, err := store.pool.Exec(ctx,
 		`INSERT INTO prize_credit_entries (player_id, source_type, source_id, amount, awarded_at, expires_at) VALUES ($1, 'lesson_completion', 'B02', 10, $2, $3)`,
 		playerID, now, activeExpiresAt); err != nil {
