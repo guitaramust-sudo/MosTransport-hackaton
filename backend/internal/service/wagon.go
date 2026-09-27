@@ -32,15 +32,23 @@ func NewWagonService(store wagonStore, catalog content.Catalog, classes content.
 	return &WagonService{store: store, catalog: catalog, classes: classes, levels: levels, manager: manager}
 }
 
-// buildWagonSeats assigns each of cfg.SeatAnchors a random passenger from
-// catalog, with each seat's actor starting at its own anchor. Shared by
+// buildWagonSeats chooses occupied seats and passengers for each new session.
+// A class without a passenger range uses every configured seat. Shared by
 // WagonService.StartSession (random level starts) and
 // LearningService.StartPractice (lesson-driven starts) so this loop lives
 // in exactly one place.
 func buildWagonSeats(catalog content.Catalog, cfg content.WagonClassConfig, rng *rand.Rand) []domain.WagonSeat {
-	seats := make([]domain.WagonSeat, len(cfg.SeatAnchors))
-	for i, anchor := range cfg.SeatAnchors {
-		passenger := catalog.Passengers[rng.Intn(len(catalog.Passengers))]
+	count := len(cfg.SeatAnchors)
+	if cfg.MinPassengers > 0 {
+		count = cfg.MinPassengers + rng.Intn(cfg.MaxPassengers-cfg.MinPassengers+1)
+	}
+	seats := make([]domain.WagonSeat, count)
+	anchors := rng.Perm(len(cfg.SeatAnchors))
+	passengers := rng.Perm(len(catalog.Passengers))
+	for i := range seats {
+		anchor := cfg.SeatAnchors[anchors[i]]
+		passengerIndex := passengers[i%len(passengers)]
+		passenger := catalog.Passengers[passengerIndex]
 		seats[i] = domain.WagonSeat{Anchor: anchor, PassengerDefID: passenger.ID, Actor: domain.WagonActor{At: anchor}}
 	}
 	return seats

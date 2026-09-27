@@ -14,6 +14,8 @@ type WagonClassConfig struct {
 	Anchors                 []string `json:"anchors,omitempty"`
 	RestrictedAnchors       []string `json:"restricted_anchors,omitempty"`
 	SeatAnchors             []string `json:"seat_anchors,omitempty"`
+	MinPassengers           int      `json:"min_passengers,omitempty"`
+	MaxPassengers           int      `json:"max_passengers,omitempty"`
 	ServicePointAnchor      string   `json:"service_point_anchor,omitempty"`
 	SessionDurationS        int      `json:"session_duration_s,omitempty"`
 	TickS                   int      `json:"tick_s,omitempty"`
@@ -66,6 +68,9 @@ func ParseWagonClasses(raw []byte) (WagonClasses, error) {
 				return nil, fmt.Errorf("wagon class %q: invalid seat anchor %q", id, a)
 			}
 			seats[a] = true
+		}
+		if (cfg.MinPassengers == 0) != (cfg.MaxPassengers == 0) || cfg.MinPassengers < 0 || cfg.MaxPassengers < cfg.MinPassengers || cfg.MaxPassengers > len(cfg.SeatAnchors) {
+			return nil, fmt.Errorf("wagon class %q: passenger range must fit the seat anchors", id)
 		}
 		for _, a := range cfg.RestrictedAnchors {
 			if !anchors[a] {

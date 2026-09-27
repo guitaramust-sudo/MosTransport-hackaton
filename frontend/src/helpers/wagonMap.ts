@@ -5,9 +5,8 @@ export type { FloorPoint }
 
 export interface WagonPoint { x: number; y: number; z: number }
 
-// Seat anchors sit in real seats of TOOOPblend.glb (Seat_R02_L_Aisle,
-// Seat_R05_R_Single, Seat_R07_*, Seat_R09_*), so passengers never stand inside
-// the galley or wardrobe.
+// Seat anchors sit in real seats of TOOOPblend.glb. All selected chairs face
+// +Z, matching the seated character animation.
 export const wagonAnchorPositions: Record<WagonAnchor, WagonPoint> = {
   seat_1: { x: -0.32, y: 0.245, z: 4.15 },
   seat_2: { x: 1.27, y: 0.245, z: -0.53 },
@@ -15,6 +14,12 @@ export const wagonAnchorPositions: Record<WagonAnchor, WagonPoint> = {
   seat_4: { x: 1.27, y: 0.245, z: -2.93 },
   seat_5: { x: -0.32, y: 0.245, z: -5.33 },
   seat_6: { x: 1.27, y: 0.245, z: -5.33 },
+  seat_7: { x: -1.27, y: 0.245, z: 4.15 }, // Seat_R02_L_Window
+  seat_8: { x: -0.32, y: 0.245, z: -0.53 }, // Seat_R05_L_Aisle
+  seat_9: { x: -0.32, y: 0.245, z: -1.73 }, // Seat_R06_L_Aisle
+  seat_10: { x: 1.27, y: 0.245, z: -1.73 }, // Seat_R06_R_Single
+  seat_11: { x: -0.32, y: 0.245, z: -4.13 }, // Seat_R08_L_Aisle
+  seat_12: { x: 1.27, y: 0.245, z: -4.13 }, // Seat_R08_R_Single
   service_point: { x: 0.47, y: 0.245, z: -5.3 },
   staff_zone: { x: 0.47, y: 0.245, z: 5.45 },
   // First-class anchors, placed from TOOOPblend.glb geometry until the 3D team
@@ -124,7 +129,9 @@ export function pointAlong(route: FloorPoint[], t: number): FloorPoint & { headi
 
 export const wagonAnchorLabels: Record<WagonAnchor, string> = {
   seat_1: 'Место 1', seat_2: 'Место 2', seat_3: 'Место 3', seat_4: 'Место 4',
-  seat_5: 'Место 5', seat_6: 'Место 6', service_point: 'Сервисная стойка', staff_zone: 'Служебная зона',
+  seat_5: 'Место 5', seat_6: 'Место 6', seat_7: 'Место 7', seat_8: 'Место 8',
+  seat_9: 'Место 9', seat_10: 'Место 10', seat_11: 'Место 11', seat_12: 'Место 12',
+  service_point: 'Сервисная стойка', staff_zone: 'Служебная зона',
   service_zone: 'Сервисная зона', sanitary_zone: 'Санузел', cab_entrance_boundary: 'Граница кабины',
 }
 
