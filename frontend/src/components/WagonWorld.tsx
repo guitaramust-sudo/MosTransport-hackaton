@@ -1,15 +1,15 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
-import { Canvas, useFrame, useThree } from '@react-three/fiber/native'
-import { OrthographicCamera, useAnimations, useGLTF } from '@react-three/drei/native'
 import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
-import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
+import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, useThree, useWagonScene } from '../helpers/three'
 import { colors } from '../helpers/theme'
-import { interpolateWagonActor, wagonAnchorPositions, wagonSituationIcon } from '../helpers/wagonMap'
+import { AISLE_MAX_Z, AISLE_MIN_Z, aislePoint, wagonAnchorLabels, interpolateWagonActor, pointAlong, pointsOfInterestFor, routeBetween, servicePointFor, wagonAnchorPositions, wagonSituationIcon, type FloorPoint } from '../helpers/wagonMap'
 import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnapshot } from '../types'
 import { Text } from './Typography'
 import { WagonBlanket } from './WagonBlanket'
+import { prepareWagonScene } from '../helpers/wagonScene'
+import { getActiveNavGrid, nearestFree } from '../helpers/navGrid'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -27,22 +27,24 @@ const AISLE_X = 0.47
 const FLOOR_Y = 0.245
 const WALK_SPEED = 2.6
 
+// The conductor always stands on the aisle centerline next to an anchor.
 function conductorPoint(anchor: WagonAnchor) {
-  const point = wagonAnchorPositions[anchor]
-  return { x: AISLE_X, y: FLOOR_Y, z: point.z }
+  const point = aislePoint(wagonAnchorPositions[anchor].z)
+  return { x: point.x, y: FLOOR_Y, z: point.z }
 }
 
 function interpolateConductor(actor: WagonActor) {
   if (!actor.moving) return { ...conductorPoint(actor.at), progress: 1 }
   const timing = interpolateWagonActor(actor)
-  const from = conductorPoint(actor.moving.from)
-  const to = conductorPoint(actor.moving.to)
-  return {
-    x: from.x + (to.x - from.x) * timing.progress,
-    y: FLOOR_Y,
-    z: from.z + (to.z - from.z) * timing.progress,
-    progress: timing.progress,
-  }
+  const point = pointAlong(routeBetween(conductorPoint(actor.moving.from), conductorPoint(actor.moving.to)), timing.progress)
+  return { x: point.x, y: FLOOR_Y, z: point.z, progress: timing.progress }
+}
+
+// Distance of a position along a route, used to walk it at a constant speed.
+function routeLengthOf(route: FloorPoint[]) {
+  let total = 0
+  for (let i = 1; i < route.length; i++) total += Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z)
+  return total
 }
 
 function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSituationType; onPress: () => void }) {
@@ -59,8 +61,8 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
     const position = interpolateWagonActor(seat.actor)
     group.current.position.set(position.x, position.y, position.z)
     const seated = seat.actor.at.startsWith('seat_') && !seat.actor.moving
-    group.current.rotation.y = seated ? (seat.anchor.endsWith('1') || seat.anchor.endsWith('3') || seat.anchor.endsWith('5') ? Math.PI / 2 : -Math.PI / 2) : 0
-    group.current.rotation.z = type === 'cold' ? Math.sin(clock.elapsedTime * 24) * 0.035 : 0
+    group.current.rotation.y = seated ? (seat.anchor.endsWith('1') || seat.anchor.endsWith('3') || seat.anchor.endsWith('5') ? Math.PI / 2 : -Math.PI / 2) : position.heading
+    group.current.rotation.z = type === 'cold' ? Math.sin(clock.elapsedTime * 9) * 0.02 : 0
     if (head.current) head.current.position.y = 1.19 + (type === 'tired' ? Math.sin(clock.elapsedTime * 3) * 0.07 : 0)
   })
 
@@ -82,11 +84,12 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
   const group = useRef<Group>(null)
   const previousMoving = useRef(false)
   const visualPosition = useRef<PlayerPosition>(interpolateConductor(actor))
-  const localTarget = useRef<PlayerPosition>(visualPosition.current)
+  const localRoute = useRef<FloorPoint[] | null>(null)
+  const localTravelled = useRef(0)
   const handledFreeRequest = useRef(0)
   const localMode = useRef(false)
   const serverMoveKey = useRef('')
-  const serverTransition = useRef<{ from: PlayerPosition; to: PlayerPosition; startedAt: number; durationMs: number } | null>(null)
+  const serverTransition = useRef<{ route: FloorPoint[]; startedAt: number; durationMs: number } | null>(null)
   const { actions } = useAnimations(model.animations, model.scene) as unknown as { actions: Record<string, AnimationAction | null> }
 
   useEffect(() => {
@@ -108,8 +111,7 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
         const to = conductorPoint(actor.moving.to)
         const serverEnd = Date.parse(actor.moving.started_at) + actor.moving.duration_s * 1000
         serverTransition.current = {
-          from: { ...visualPosition.current },
-          to,
+          route: routeBetween(visualPosition.current, to),
           startedAt: Date.now(),
           durationMs: Math.max(120, serverEnd - Date.now()),
         }
@@ -117,12 +119,9 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
       const transition = serverTransition.current
       if (transition) {
         const progress = Math.max(0, Math.min(1, (Date.now() - transition.startedAt) / transition.durationMs))
-        visualPosition.current = {
-          x: transition.from.x + (transition.to.x - transition.from.x) * progress,
-          y: FLOOR_Y,
-          z: transition.from.z + (transition.to.z - transition.from.z) * progress,
-        }
-        group.current.rotation.y = Math.atan2(transition.to.x - visualPosition.current.x, transition.to.z - visualPosition.current.z)
+        const point = pointAlong(transition.route, progress)
+        visualPosition.current = { x: point.x, y: FLOOR_Y, z: point.z }
+        group.current.rotation.y = point.heading
         moving = progress < 1
       }
     } else {
@@ -133,21 +132,22 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
       }
       if (freeTarget && freeTarget.request !== handledFreeRequest.current) {
         handledFreeRequest.current = freeTarget.request
-        localTarget.current = { x: freeTarget.x, y: FLOOR_Y, z: freeTarget.z }
+        // Walk to the tapped floor point along a path around furniture and walls.
+        const grid = getActiveNavGrid()
+        const target = grid ? nearestFree(grid, freeTarget) : aislePoint(freeTarget.z)
+        localRoute.current = routeBetween(visualPosition.current, target)
+        localTravelled.current = 0
         localMode.current = true
       }
-      if (localMode.current) {
-        const dx = localTarget.current.x - visualPosition.current.x
-        const dz = localTarget.current.z - visualPosition.current.z
-        const distance = Math.hypot(dx, dz)
-        if (distance > 0.025) {
-          const step = Math.min(distance, delta * WALK_SPEED)
-          visualPosition.current.x += (dx / distance) * step
-          visualPosition.current.z += (dz / distance) * step
-          group.current.rotation.y = Math.atan2(dx, dz)
+      if (localMode.current && localRoute.current) {
+        const route = localRoute.current
+        const length = routeLengthOf(route)
+        localTravelled.current = Math.min(length, localTravelled.current + delta * WALK_SPEED)
+        const point = pointAlong(route, length === 0 ? 1 : localTravelled.current / length)
+        visualPosition.current = { x: point.x, y: FLOOR_Y, z: point.z }
+        if (localTravelled.current < length) {
+          group.current.rotation.y = point.heading
           moving = true
-        } else {
-          visualPosition.current = { ...localTarget.current }
         }
       } else {
         visualPosition.current = conductorPoint(actor.at)
@@ -167,7 +167,10 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
 
 function CameraFollow({ playerPosition }: { playerPosition: MutableRefObject<PlayerPosition> }) {
   const { size } = useThree()
-  const zoom = size.width / 3.75
+  // Portrait (phones): look down the wagon, the aisle runs vertically.
+  // Landscape (PC): look from the side so the wagon runs horizontally.
+  const landscape = size.width > size.height * 1.1
+  const zoom = landscape ? size.height / 4.2 : size.width / 3.75
   const camera = useRef<ThreeOrthographicCamera>(null)
   const desiredPosition = useRef(new Vector3())
   const lookAt = useRef(new Vector3())
@@ -175,24 +178,38 @@ function CameraFollow({ playerPosition }: { playerPosition: MutableRefObject<Pla
   useFrame((_, delta) => {
     if (!camera.current) return
 
-    const followedZ = Math.max(-4.5, Math.min(4.5, playerPosition.current.z))
+    const followedZ = Math.max(AISLE_MIN_Z + 1.5, Math.min(AISLE_MAX_Z - 1.5, playerPosition.current.z))
     const smoothing = 1 - Math.exp(-6 * delta)
-    desiredPosition.current.set(3.2, 18, followedZ + 9.4)
+    if (landscape) desiredPosition.current.set(AISLE_X + 2.0, 18, followedZ)
+    else desiredPosition.current.set(3.2, 18, followedZ + 9.4)
     camera.current.position.lerp(desiredPosition.current, smoothing)
-    lookAt.current.set(0, FLOOR_Y, followedZ)
+    lookAt.current.set(landscape ? AISLE_X - 0.4 : 0, FLOOR_Y, followedZ)
     camera.current.lookAt(lookAt.current)
+    camera.current.zoom = zoom
     camera.current.updateProjectionMatrix()
   })
 
-  return <OrthographicCamera ref={camera} makeDefault position={[0, 18, 10]} zoom={zoom} near={0.1} far={100} />
+  return <OrthographicCamera ref={camera} makeDefault position={[0, 18, 10]} zoom={zoom} near={4} far={45} />
 }
+
+function poiIcon(anchor: WagonAnchor) {
+  if (anchor === 'service_point' || anchor === 'service_zone') return '+'
+  if (anchor === 'staff_zone' || anchor === 'cab_entrance_boundary') return '⌁'
+  if (anchor === 'sanitary_zone') return 'WC'
+  return '•'
+}
+
+const restrictedAnchors = new Set<WagonAnchor>(['staff_zone', 'cab_entrance_boundary'])
+// Keep markers out of the bottom action area (inspect / finish buttons, hint)
+// so a marker never sits under a button and swallows or loses the tap.
+const MARKER_BOTTOM_SAFE = 190
 
 function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onProject: (value: Marker[]) => void }) {
   const point = useRef(new Vector3())
   const previous = useRef('')
   useFrame(({ camera, size }) => {
     const situations = new Map(snapshot.active_situations.map((item) => [item.seat_anchor, item]))
-    const anchors = [...snapshot.active_situations.map((item) => item.seat_anchor), 'service_point'] as WagonAnchor[]
+    const anchors = [...snapshot.active_situations.map((item) => item.seat_anchor), ...pointsOfInterestFor(snapshot.wagon_state.class_id)] as WagonAnchor[]
     const markers = anchors.map((anchor) => {
       const seat = snapshot.wagon_state.seats.find((item) => item.anchor === anchor)
       const position = seat && situations.has(anchor) ? interpolateWagonActor(seat.actor) : wagonAnchorPositions[anchor]
@@ -200,7 +217,7 @@ function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onP
       const situation = situations.get(anchor)
       const x = Math.round((point.current.x * 0.5 + 0.5) * size.width)
       const y = Math.round((-point.current.y * 0.5 + 0.5) * size.height)
-      return { anchor, x, y, visible: point.current.z > -1 && point.current.z < 1 && x > 18 && x < size.width - 18 && y > 150 && y < size.height - 86, icon: situation ? wagonSituationIcon(situation.type) : anchor === 'service_point' ? '+' : anchor === 'staff_zone' ? '⌁' : '•', active: Boolean(situation) }
+      return { anchor, x, y, visible: point.current.z > -1 && point.current.z < 1 && x > 18 && x < size.width - 18 && y > 150 && y < size.height - MARKER_BOTTOM_SAFE, icon: situation ? wagonSituationIcon(situation.type) : poiIcon(anchor), active: Boolean(situation) }
     })
     const signature = markers.map((item) => `${item.anchor}:${item.x}:${item.y}:${item.visible}:${item.icon}`).join('|')
     if (signature !== previous.current) { previous.current = signature; onProject(markers) }
@@ -209,7 +226,10 @@ function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onP
 }
 
 function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, onProject }: WagonWorldProps & { freeTarget: FreeWalkTarget | null; onFreeTarget: (x: number, z: number) => void; onProject: (value: Marker[]) => void }) {
-  const wagonScene = useNativeWagonScene()
+  const modelScene = useWagonScene()
+  // Game copy of the model: walkway blockers and the cab shell hidden, floor
+  // layers ordered, walkability grid built.
+  const wagonScene = useMemo(() => prepareWagonScene(modelScene), [modelScene])
   const playerPosition = useRef<PlayerPosition>(interpolateConductor(snapshot.wagon_state.player))
   const situations = new Map(snapshot.active_situations.map((item) => [item.seat_anchor, item.type]))
   return (
@@ -218,20 +238,18 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <ambientLight intensity={2.1} />
       <directionalLight position={[4, 9, -2]} intensity={2.5} />
       <primitive object={wagonScene} />
-      <WagonBlanket onPress={() => { if (!disabled) onAnchorPress('service_point') }} />
+      <WagonBlanket onPress={() => { if (!disabled) onAnchorPress(servicePointFor(snapshot.wagon_state.class_id)) }} />
       <mesh
-        position={[AISLE_X, FLOOR_Y + 0.012, 0]}
+        position={[0, FLOOR_Y + 0.012, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         onPointerDown={(event) => {
           event.stopPropagation()
           if (disabled) return
-          onFreeTarget(
-            Math.max(0.16, Math.min(0.78, event.point.x)),
-            Math.max(-6.2, Math.min(6.2, event.point.z)),
-          )
+          // Any floor tap walks to the nearest aisle point at that depth.
+          onFreeTarget(event.point.x, event.point.z)
         }}
       >
-        <planeGeometry args={[0.62, 12.4]} />
+        <planeGeometry args={[3.4, AISLE_MAX_Z - AISLE_MIN_Z]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {snapshot.wagon_state.seats.map((seat) => <Passenger key={seat.anchor} seat={seat} type={situations.get(seat.anchor)} onPress={() => { if (!disabled && situations.has(seat.anchor)) onAnchorPress(seat.anchor) }} />)}
@@ -245,8 +263,11 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
 export function WagonWorld({ snapshot, disabled, onAnchorPress }: WagonWorldProps) {
   const [markers, setMarkers] = useState<Marker[]>([])
   const [freeTarget, setFreeTarget] = useState<FreeWalkTarget | null>(null)
+  // The onboarding hint goes away once the player has tapped anything.
+  const [interacted, setInteracted] = useState(false)
   const request = useRef(0)
   const setVisualTarget = (x: number, z: number) => {
+    setInteracted(true)
     request.current += 1
     setFreeTarget({ x, z, request: request.current })
   }
@@ -259,15 +280,15 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress }: WagonWorldProp
   }
   return (
     <View style={styles.container}>
-      <Canvas style={styles.canvas} shadows gl={{ antialias: false }}>
+      <Canvas style={styles.canvas} shadows gl={canvasGl}>
         <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} freeTarget={freeTarget} onAnchorPress={handleAnchorPress} onFreeTarget={setVisualTarget} onProject={setMarkers} /></Suspense>
       </Canvas>
       {markers.map((marker) => marker.visible && (
-        <Pressable key={marker.anchor} disabled={disabled} onPress={() => handleAnchorPress(marker.anchor)} style={[styles.marker, marker.active && styles.markerActive, marker.anchor === 'staff_zone' && styles.markerRestricted, { left: marker.x - 20, top: marker.y - 20 }]}>
+        <Pressable key={marker.anchor} accessibilityRole="button" accessibilityLabel={wagonAnchorLabels[marker.anchor]} hitSlop={8} disabled={disabled} onPress={() => handleAnchorPress(marker.anchor)} style={[styles.marker, marker.active && styles.markerActive, restrictedAnchors.has(marker.anchor) && styles.markerRestricted, { left: marker.x - 20, top: marker.y - 20 }]}>
           <Text style={[styles.markerText, !marker.active && styles.markerTextQuiet]}>{marker.icon}</Text>
         </Pressable>
       ))}
-      <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Нажмите на пассажира или точку вагона</Text></View>
+      {!interacted && <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Нажмите на пассажира или точку вагона</Text></View>}
       {!snapshot && <ActivityIndicator style={StyleSheet.absoluteFill} color={colors.primary} />}
     </View>
   )
