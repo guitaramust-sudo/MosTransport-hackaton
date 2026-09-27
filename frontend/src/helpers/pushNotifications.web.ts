@@ -1,3 +1,5 @@
+export const isExpoGo = false
+
 export async function registerForPushNotifications(): Promise<string> {
   throw new Error('Push-уведомления доступны в приложении для телефона.')
 }

@@ -10,6 +10,9 @@ const HIDDEN_PARTS = new RegExp('^(' + [
   'Partly open interior sliding door',
   'Interior sliding door glass',
   'Preview ground',
+  // Exported at the origin instead of under the head car. Its dark top face
+  // sits above the wood floor by the wardrobe and looks like a black hole.
+  'VSM head car front powered bogie frame',
 ].map((name) => name.replace(/ /g, '[ _]')).join('|') + ')')
 
 const EXTERIOR_PART = /^VSM[ _]/

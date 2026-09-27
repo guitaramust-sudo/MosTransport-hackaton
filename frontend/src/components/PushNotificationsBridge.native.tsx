@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
-import * as Notifications from 'expo-notifications'
 import { navigate, useAppDispatch, useAppSelector } from '../app/store'
-import { syncExistingPushRegistration } from '../helpers/pushNotifications'
+import { isExpoGo, syncExistingPushRegistration } from '../helpers/pushNotifications'
+import type { NotificationResponse } from 'expo-notifications'
 import type { AppScreen } from '../types'
 
 function destination(data: Record<string, unknown>): AppScreen | null {
@@ -18,19 +18,33 @@ export function PushNotificationsBridge() {
   const lastResponseId = useRef<string | null>(null)
 
   useEffect(() => {
-    function handle(response: Notifications.NotificationResponse) {
+    if (isExpoGo) return
+    let disposed = false
+    let listener: { remove: () => void } | undefined
+    function handle(response: NotificationResponse) {
+      if (disposed) return
       const id = response.notification.request.identifier
       if (lastResponseId.current === id) return
       lastResponseId.current = id
-      void Notifications.clearLastNotificationResponseAsync().catch(() => {})
       const screen = destination(response.notification.request.content.data ?? {})
       if (!screen) return
       if (signedIn) dispatch(navigate(screen))
       else pending.current = screen
     }
-    const listener = Notifications.addNotificationResponseReceivedListener(handle)
-    Notifications.getLastNotificationResponseAsync().then((response) => { if (response) handle(response) }).catch(() => {})
-    return () => listener.remove()
+    void import('expo-notifications').then((Notifications) => {
+      if (disposed) return
+      listener = Notifications.addNotificationResponseReceivedListener((response) => {
+        handle(response)
+        void Notifications.clearLastNotificationResponseAsync().catch(() => {})
+      })
+      void Notifications.getLastNotificationResponseAsync().then((response) => {
+        if (response) {
+          handle(response)
+          void Notifications.clearLastNotificationResponseAsync().catch(() => {})
+        }
+      }).catch(() => {})
+    }).catch((error) => console.warn('Push notifications unavailable', error))
+    return () => { disposed = true; listener?.remove() }
   }, [dispatch, signedIn])
 
   useEffect(() => {
