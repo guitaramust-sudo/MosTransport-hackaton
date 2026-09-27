@@ -44,6 +44,12 @@ type MustConvey struct {
 	// given address (e.g. "Сообщить начальнику поезда" is satisfied by calling
 	// train_chief). Empty means the point is independent of escalation.
 	EscalationTarget string `json:"escalation_target,omitempty"`
+	PhysicalAction   bool   `json:"physical_action,omitempty"`
+}
+
+type PhysicalRequirement struct {
+	Kind string `json:"kind"`
+	Item string `json:"item,omitempty"`
 }
 
 type Escalation struct {
@@ -57,16 +63,17 @@ type CorrectCompletion struct {
 }
 
 type Scenario struct {
-	ID                string            `json:"id"`
-	Type              ScenarioType      `json:"type"`
-	Criticality       Criticality       `json:"criticality"`
-	ValidationStatus  string            `json:"validation_status"`
-	ReviewerID        string            `json:"reviewer_id,omitempty"`
-	SourceRefs        []string          `json:"source_refs,omitempty"`
-	Title             string            `json:"title"`
-	Opening           string            `json:"opening"`
-	CorrectCompletion CorrectCompletion `json:"correct_completion"`
-	TimeLimitSec      int               `json:"time_limit_sec"`
+	ID                  string               `json:"id"`
+	Type                ScenarioType         `json:"type"`
+	Criticality         Criticality          `json:"criticality"`
+	ValidationStatus    string               `json:"validation_status"`
+	ReviewerID          string               `json:"reviewer_id,omitempty"`
+	SourceRefs          []string             `json:"source_refs,omitempty"`
+	Title               string               `json:"title"`
+	Opening             string               `json:"opening"`
+	CorrectCompletion   CorrectCompletion    `json:"correct_completion"`
+	TimeLimitSec        int                  `json:"time_limit_sec"`
+	PhysicalRequirement *PhysicalRequirement `json:"physical_requirement,omitempty"`
 }
 
 type Passenger struct {
@@ -143,14 +150,34 @@ func (c Catalog) Validate() error {
 			return fmt.Errorf("%s: must_convey must be nonempty", where)
 		}
 		pointIDs := map[string]bool{}
+		hasPhysicalPoint := false
 		for _, p := range s.CorrectCompletion.MustConvey {
 			if blank(p.ID) || blank(p.Desc) || pointIDs[p.ID] {
 				return fmt.Errorf("%s: empty or duplicate must_convey id/desc %q", where, p.ID)
 			}
 			pointIDs[p.ID] = true
+			if p.PhysicalAction {
+				hasPhysicalPoint = true
+			}
 			if p.EscalationTarget != "" && !oneOf(p.EscalationTarget, TargetTrainChief, TargetPTB, TargetPolice, TargetMedic, TargetAmbulance) {
 				return fmt.Errorf("%s: invalid escalation_target %q", where, p.EscalationTarget)
 			}
+		}
+		if pr := s.PhysicalRequirement; pr != nil {
+			if !oneOf(pr.Kind, "deliver_item", "redirect") {
+				return fmt.Errorf("%s: invalid physical_requirement kind %q", where, pr.Kind)
+			}
+			if pr.Kind == "deliver_item" && blank(pr.Item) {
+				return fmt.Errorf("%s: physical_requirement item required", where)
+			}
+			if pr.Kind == "redirect" && !blank(pr.Item) {
+				return fmt.Errorf("%s: redirect must not specify item", where)
+			}
+			if !hasPhysicalPoint {
+				return fmt.Errorf("%s: physical_requirement needs a physical_action point", where)
+			}
+		} else if hasPhysicalPoint {
+			return fmt.Errorf("%s: physical_action point needs physical_requirement", where)
 		}
 		targets := map[string]bool{}
 		for _, target := range s.CorrectCompletion.Escalation.To {

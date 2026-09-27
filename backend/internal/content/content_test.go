@@ -72,3 +72,36 @@ func TestParseRejectsMalformedJSON(t *testing.T) {
 		t.Fatalf("Parse() = %v, want scenarios.json error", err)
 	}
 }
+
+func TestPhysicalRequirementValidation(t *testing.T) {
+	base := Scenario{ID: "s", Type: TypeService, Criticality: CritLow, ValidationStatus: "draft", Title: "T", Opening: "O", TimeLimitSec: 30,
+		CorrectCompletion:   CorrectCompletion{MustConvey: []MustConvey{{ID: "A", Desc: "D", PhysicalAction: true}}},
+		PhysicalRequirement: &PhysicalRequirement{Kind: "deliver_item", Item: "blanket"}}
+	check := func(s Scenario) error {
+		return Catalog{Scenarios: []Scenario{s}, Passengers: []Passenger{{ID: "p", Age: "middle", Tone: "calm", Language: "ru", PromptHint: "H"}}}.Validate()
+	}
+	if err := check(base); err != nil {
+		t.Fatal(err)
+	}
+	s := base
+	s.PhysicalRequirement = &PhysicalRequirement{Kind: "deliver_item"}
+	if err := check(s); err == nil {
+		t.Fatal("missing item accepted")
+	}
+	s = base
+	s.PhysicalRequirement = &PhysicalRequirement{Kind: "teleport"}
+	if err := check(s); err == nil {
+		t.Fatal("unknown kind accepted")
+	}
+	s = base
+	s.PhysicalRequirement = nil
+	if err := check(s); err == nil {
+		t.Fatal("physical point without requirement accepted")
+	}
+	s = base
+	s.PhysicalRequirement = nil
+	s.CorrectCompletion.MustConvey = []MustConvey{{ID: "A", Desc: "D"}}
+	if err := check(s); err != nil {
+		t.Fatalf("legacy scenario rejected: %v", err)
+	}
+}
