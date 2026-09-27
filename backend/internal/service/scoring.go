@@ -45,14 +45,19 @@ var remarkTable = map[string]Remark{
 
 // EvaluateScore is pure: the model reports facts, while outcome, remarks,
 // XP and final scales are computed here from the scenario and recorded actions.
-func EvaluateScore(scenario content.Scenario, observed llm.ScoreResult, actualEscalations []string, elapsed time.Duration, forcedTimeout bool) ScoreSummary {
+func EvaluateScore(scenario content.Scenario, observed llm.ScoreResult, actualEscalations []string, elapsed time.Duration, forcedTimeout, physicalActionDone bool) ScoreSummary {
 	result := ScoreSummary{LLMResult: observed, Remarks: []Remark{}, Conveyed: []string{}, Missed: []string{}}
 	conveyed := map[string]bool{}
 	for _, id := range observed.Conveyed {
 		conveyed[strings.TrimSpace(id)] = true
 	}
 	for _, point := range scenario.CorrectCompletion.MustConvey {
-		if conveyed[point.ID] || (point.EscalationTarget != "" && contains(actualEscalations, point.EscalationTarget)) {
+		satisfied := conveyed[point.ID] || (point.EscalationTarget != "" && contains(actualEscalations, point.EscalationTarget))
+		if point.PhysicalAction {
+			// A passenger dialogue cannot confirm a physical action on its own.
+			satisfied = physicalActionDone
+		}
+		if satisfied {
 			result.Conveyed = append(result.Conveyed, point.ID)
 		} else {
 			result.Missed = append(result.Missed, point.ID)

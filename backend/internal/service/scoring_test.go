@@ -25,7 +25,7 @@ func TestEvaluateScoreExample(t *testing.T) {
 		Conveyed: []string{"A", "B", "INVALID", "A"}, Missed: []string{"A"},
 		Tone: "empathic", EscalationOK: false,
 	}
-	got := EvaluateScore(scenario, score, []string{content.TargetTrainChief, content.TargetMedic}, 25*time.Second, false)
+	got := EvaluateScore(scenario, score, []string{content.TargetTrainChief, content.TargetMedic}, 25*time.Second, false, false)
 	if got.Outcome != "partial" || got.XP != 20 || got.Safety != 65 || got.Loyalty != 60 {
 		t.Fatalf("example = %+v, want partial/20/65/60 from the remark table", got)
 	}
@@ -57,7 +57,7 @@ func TestEvaluateScoreOutcomes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := EvaluateScore(testScenario(tc.points, tc.required, tc.targets), llm.ScoreResult{Conveyed: tc.conveyed}, tc.actual, tc.elapsed, false)
+			got := EvaluateScore(testScenario(tc.points, tc.required, tc.targets), llm.ScoreResult{Conveyed: tc.conveyed}, tc.actual, tc.elapsed, false, false)
 			if got.Outcome != tc.want {
 				t.Fatalf("outcome = %s, want %s", got.Outcome, tc.want)
 			}
@@ -73,7 +73,7 @@ func TestEvaluateScoreOutcomes(t *testing.T) {
 }
 
 func TestForcedTimeoutStillScoresFacts(t *testing.T) {
-	got := EvaluateScore(testScenario(1, false, nil), llm.ScoreResult{Conveyed: []string{"A"}}, nil, 59*time.Second, true)
+	got := EvaluateScore(testScenario(1, false, nil), llm.ScoreResult{Conveyed: []string{"A"}}, nil, 59*time.Second, true, false)
 	if got.Outcome != "timeout" || len(got.Missed) != 0 {
 		t.Fatalf("forced timeout = %+v", got)
 	}
@@ -90,7 +90,7 @@ func TestEscalationSatisfiesLinkedPoint(t *testing.T) {
 
 	// The LLM reports everything missed, but the player escalated to
 	// train_chief, so the escalation-linked point C must be auto-conveyed.
-	got := EvaluateScore(scenario, llm.ScoreResult{Conveyed: []string{}}, []string{content.TargetTrainChief}, 30*time.Second, false)
+	got := EvaluateScore(scenario, llm.ScoreResult{Conveyed: []string{}}, []string{content.TargetTrainChief}, 30*time.Second, false, false)
 
 	if len(got.Conveyed) != 1 || got.Conveyed[0] != "C" {
 		t.Fatalf("conveyed = %v, want [C]", got.Conveyed)
@@ -100,5 +100,22 @@ func TestEscalationSatisfiesLinkedPoint(t *testing.T) {
 	}
 	if got.Outcome != "fail" {
 		t.Fatalf("outcome = %s, want fail (2 of 3 still missed)", got.Outcome)
+	}
+}
+
+func TestPhysicalActionRequiresServerConfirmation(t *testing.T) {
+	scenario := content.Scenario{TimeLimitSec: 90, CorrectCompletion: content.CorrectCompletion{MustConvey: []content.MustConvey{
+		{ID: "A", Desc: "Уточнить запрос"}, {ID: "B", Desc: "Принести плед", PhysicalAction: true},
+	}}}
+	// Even if a dialogue model believes the item was delivered, the server must
+	// observe give_item before the physical point can count.
+	observed := llm.ScoreResult{Conveyed: []string{"A", "B"}}
+	notDone := EvaluateScore(scenario, observed, nil, 30*time.Second, false, false)
+	if !contains(notDone.Missed, "B") || notDone.Outcome == "success" {
+		t.Fatalf("unconfirmed action counted: %+v", notDone)
+	}
+	done := EvaluateScore(scenario, observed, nil, 30*time.Second, false, true)
+	if len(done.Missed) != 0 || done.Outcome != "success" {
+		t.Fatalf("confirmed action missed: %+v", done)
 	}
 }

@@ -162,7 +162,7 @@ func (s *SituationService) finishLoaded(ctx context.Context, sit domain.Situatio
 			observed = llm.ScoreResult{Tone: "neutral", Reasoning: "scoring fallback"}
 		}
 		timedOut := sit.TimerDeadline != nil && !now.Before(*sit.TimerDeadline)
-		result := EvaluateScore(scenario, observed, sit.Escalations, input.Elapsed, timedOut)
+		result := EvaluateScore(scenario, observed, sit.Escalations, input.Elapsed, timedOut, sit.PhysicalActionDone)
 		remarksJSON, err := json.Marshal(result.Remarks)
 		if err != nil {
 			return err
