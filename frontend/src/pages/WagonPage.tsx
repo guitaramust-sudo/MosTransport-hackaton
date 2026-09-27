@@ -187,26 +187,33 @@ export function WagonPage() {
     if (selectedId && snapshot && !activeById(selectedId)) dispatch(setWagonSelectedSituation(null))
   }, [activeById, dispatch, selectedId, snapshot])
 
-  const handleAnchorPress = (anchor: WagonAnchor) => {
+  const handleAnchorPress = (anchor: WagonAnchor, nearby: boolean, fromJoystick: boolean) => {
     if (!snapshot) return
     if (snapshot.wagon_state.player.moving) return
+    if (!nearby) { showToast(`Подойдите джойстиком: ${wagonAnchorLabels[anchor]}`); return }
     const isSeat = anchor.startsWith('seat_')
     const here = snapshot.wagon_state.player.at === anchor
-    // In a lesson, points of interest are places to walk to and inspect.
+    // Only a joystick arrival can register a new anchor on the server.
     if (!isSeat && (isLessonPractice || anchor !== servicePoint)) {
-      if (!here) { sendCommand({ type: 'move_to', anchor }); return }
+      if (!here) {
+        if (fromJoystick) {
+          if (anchor === servicePoint) setServiceRequested(true)
+          sendCommand({ type: 'move_to', anchor })
+        }
+        else showToast('Отпустите джойстик рядом с точкой')
+        return
+      }
       // Already standing here: act on the point instead of ignoring the tap.
       const inspectable = (objectsAtAnchor[anchor] ?? []).find((object) => !(snapshot.wagon_state.inspected_objects ?? []).includes(object) && (lesson.data?.required_object_ids ?? []).includes(object))
       if (inspectable) { sendCommand({ type: 'inspect', item: inspectable }); return }
-      if (anchor === servicePoint) { setServiceContext(null); setShowService(true); return }
+      if (anchor === servicePoint) { setShowService(true); return }
       showToast(`Вы уже здесь: ${wagonAnchorLabels[anchor]}`)
       return
     }
     if (anchor === servicePoint) {
-      setServiceContext(null)
-      setServiceRequested(true)
       if (snapshot.wagon_state.player.at === anchor) { setServiceRequested(false); setShowService(true) }
-      else sendCommand({ type: 'move_to', anchor })
+      else if (fromJoystick) { setServiceRequested(true); sendCommand({ type: 'move_to', anchor }) }
+      else showToast('Отпустите джойстик рядом с сервисной точкой')
       return
     }
     const active = snapshot.active_situations.find((item) => item.seat_anchor === anchor)
@@ -214,8 +221,10 @@ export function WagonPage() {
     if (isNearSituation(active)) { openSituation(active.situation_id); return }
     const seat = seatForSituation(active)
     const target = seat?.actor.at ?? anchor
-    setPendingSituationId(active.situation_id)
-    sendCommand({ type: 'move_to', anchor: target })
+    if (fromJoystick) {
+      setPendingSituationId(active.situation_id)
+      sendCommand({ type: 'move_to', anchor: target })
+    } else showToast('Отпустите джойстик рядом с пассажиром')
   }
 
   const perform = async (work: () => Promise<unknown>) => {
@@ -297,8 +306,8 @@ export function WagonPage() {
     const targetSeat = targetSituation ? seatForSituation(targetSituation) : undefined
     if (!targetSituation || !targetSeat) { setServiceContext(null); setShowService(false); return }
     setShowService(false)
-    setPendingSituationId(serviceContext.situationId)
-    sendCommand({ type: 'move_to', anchor: targetSeat.actor.at })
+    if (snapshot.wagon_state.player.at === targetSeat.actor.at && !awayFromAnchor) openSituation(serviceContext.situationId)
+    else showToast('Подойдите к пассажиру джойстиком')
   }
 
   const visited = new Set<string>(snapshot.wagon_state.visited_anchors ?? [])
@@ -319,9 +328,8 @@ export function WagonPage() {
   // The inventory opens the service point, where items are picked up.
   const openInventory = () => {
     setServiceContext(null)
-    setServiceRequested(true)
-    if (player.at === servicePoint && !player.moving) setShowService(true)
-    else sendCommand({ type: 'move_to', anchor: servicePoint })
+    if (player.at === servicePoint && !player.moving && !awayFromAnchor) setShowService(true)
+    else showToast('Подойдите к сервисной точке джойстиком')
   }
 
   const sendPhysical = (command: WagonCommand) => {
@@ -356,12 +364,12 @@ export function WagonPage() {
                   <Text style={styles.goalText}>Заметьте пассажира, подойдите и выясните его просьбу в разговоре.</Text>
                 ) : next ? (
                   <Pressable accessibilityRole="button" accessibilityLabel={`${next.verb}: ${next.label}`}
-                    disabled={!next.target || Boolean(player.moving) || player.at === next.target}
-                    onPress={() => { if (next.target && player.at !== next.target) sendCommand({ type: 'move_to', anchor: next.target }) }}
+                    disabled={!next.target || Boolean(player.moving)}
+                    onPress={() => showToast(`Подойдите джойстиком: ${next.label}`)}
                     style={styles.goalRow}>
                     <View style={styles.goalCheck} />
                     <Text style={styles.goalText}>{next.verb}: {next.label}</Text>
-                    {next.target && player.at !== next.target && <Text style={styles.goalGo}>Идти →</Text>}
+                    {next.target && player.at !== next.target && <Text style={styles.goalGo}>Джойстик →</Text>}
                   </Pressable>
                 ) : (
                   <View style={styles.goalRow}>
@@ -373,7 +381,7 @@ export function WagonPage() {
             )
           })()}
           {toast && <View style={styles.movingToast}><Text style={styles.movingText}>{toast}</Text></View>}
-          {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Подходим к пассажиру…</Text></View>}
+          {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Открываем обращение…</Text></View>}
         </View>
       </View>
       {isLessonPractice && !selectedId && !showService && inspectHere.length > 0 && (
@@ -431,7 +439,7 @@ export function WagonPage() {
               {requirement && !detail.physical_action_done && <View style={styles.physicalCard}>
                 <View style={styles.physicalText}><Text style={styles.physicalTitle}>{requirement.kind === 'deliver_item' ? `Передайте: ${wagonItemLabels[requirement.item]}` : 'Верните пассажира на место'}</Text><Text style={styles.physicalHint}>Сначала подойдите к нужной точке в вагоне</Text></View>
                 {requirement.kind === 'deliver_item' && carried.includes(requirement.item) && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'give_item', situation_id: selectedId, item: requirement.item })} style={styles.smallButton}><Text style={styles.smallButtonText}>Передать</Text></Pressable>}
-                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); setServiceRequested(true); if (snapshot.wagon_state.player.at === servicePoint) setShowService(true); else sendCommand({ type: 'move_to', anchor: servicePoint }) }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
+                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); if (snapshot.wagon_state.player.at === servicePoint && !awayFromAnchor) setShowService(true); else showToast('Подойдите к сервисной точке джойстиком') }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
                 {requirement.kind === 'redirect' && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'redirect', situation_id: selectedId })} style={styles.smallButton}><Text style={styles.smallButtonText}>Проводить</Text></Pressable>}
               </View>}
               <Text style={styles.helpLabel}>ВЫЗВАТЬ ПОМОЩЬ</Text>

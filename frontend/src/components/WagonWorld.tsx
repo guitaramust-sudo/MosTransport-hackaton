@@ -5,12 +5,12 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { conductorAsset, forestAsset, passengerAssetFor, wagonAsset } from '../helpers/gameAssets'
 import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, textureSource, useTexture, useThree, useWagonScene } from '../helpers/three'
 import { colors } from '../helpers/theme'
-import { AISLE_MAX_Z, AISLE_MIN_Z, aislePoint, wagonAnchorLabels, interpolateWagonActor, pointAlong, pointsOfInterestFor, routeBetween, servicePointFor, wagonAnchorPositions, wagonSituationIcon, type FloorPoint } from '../helpers/wagonMap'
+import { AISLE_MAX_Z, AISLE_MIN_Z, aislePoint, wagonAnchorLabels, interpolateWagonActor, pointAlong, pointsOfInterestFor, routeBetween, servicePointFor, wagonAnchorPositions, wagonSituationIcon } from '../helpers/wagonMap'
 import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnapshot } from '../types'
 import { Text } from './Typography'
 import { WagonBlanket } from './WagonBlanket'
 import { prepareWagonScene } from '../helpers/wagonScene'
-import { getActiveNavGrid, isWalkable, nearestFree } from '../helpers/navGrid'
+import { getActiveNavGrid, isWalkable } from '../helpers/navGrid'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -18,7 +18,7 @@ useGLTF.preload(conductorAsset)
 interface WagonWorldProps {
   snapshot: WagonSnapshot
   disabled?: boolean
-  onAnchorPress: (anchor: WagonAnchor) => void
+  onAnchorPress: (anchor: WagonAnchor, nearby: boolean, fromJoystick: boolean) => void
   /** Lessons show their own task card, so the generic hint can be turned off. */
   showHint?: boolean
   /** Reports whether the conductor has walked away from the anchor the server has them at. */
@@ -27,11 +27,10 @@ interface WagonWorldProps {
 
 interface PlayerPosition { x: number; y: number; z: number }
 interface Marker { anchor: WagonAnchor; x: number; y: number; visible: boolean; icon: string; active: boolean }
-interface FreeWalkTarget { x: number; z: number; request: number }
 /** Joystick deflection in screen space, each axis -1..1 (y grows downwards). */
 interface JoystickState { active: boolean; x: number; y: number }
 const JOYSTICK_RADIUS = 48
-// Drags shorter than this stay taps (walk to point / press marker).
+// Drags shorter than this remain taps on interactive objects.
 const JOYSTICK_DEAD_ZONE = 10
 // A tap still counts as a click after this much pointer travel (px).
 const CLICK_SLOP = 6
@@ -52,13 +51,6 @@ function interpolateConductor(actor: WagonActor) {
   const timing = interpolateWagonActor(actor)
   const point = pointAlong(routeBetween(conductorPoint(actor.moving.from), conductorPoint(actor.moving.to)), timing.progress)
   return { x: point.x, y: FLOOR_Y, z: point.z, progress: timing.progress }
-}
-
-// Distance of a position along a route, used to walk it at a constant speed.
-function routeLengthOf(route: FloorPoint[]) {
-  let total = 0
-  for (let i = 1; i < route.length; i++) total += Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z)
-  return total
 }
 
 function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSituationType; onPress: () => void }) {
@@ -126,7 +118,7 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
   )
 }
 
-function Conductor({ actor, freeTarget, playerPosition, joystick }: { actor: WagonActor; freeTarget: FreeWalkTarget | null; playerPosition: MutableRefObject<PlayerPosition>; joystick: MutableRefObject<JoystickState> }) {
+function Conductor({ actor, playerPosition, joystick }: { actor: WagonActor; playerPosition: MutableRefObject<PlayerPosition>; joystick: MutableRefObject<JoystickState> }) {
   const { camera } = useThree()
   const screenRight = useRef(new Vector3())
   const screenUp = useRef(new Vector3())
@@ -134,12 +126,7 @@ function Conductor({ actor, freeTarget, playerPosition, joystick }: { actor: Wag
   const group = useRef<Group>(null)
   const previousMoving = useRef(false)
   const visualPosition = useRef<PlayerPosition>(interpolateConductor(actor))
-  const localRoute = useRef<FloorPoint[] | null>(null)
-  const localTravelled = useRef(0)
-  const handledFreeRequest = useRef(0)
   const localMode = useRef(false)
-  const serverMoveKey = useRef('')
-  const serverTransition = useRef<{ route: FloorPoint[]; startedAt: number; durationMs: number } | null>(null)
   const { actions } = useAnimations(model.animations, model.scene) as unknown as { actions: Record<string, AnimationAction | null> }
 
   useEffect(() => {
@@ -154,41 +141,10 @@ function Conductor({ actor, freeTarget, playerPosition, joystick }: { actor: Wag
     let moving = false
 
     if (actor.moving) {
-      const key = `${actor.moving.from}:${actor.moving.to}:${actor.moving.started_at}`
-      if (serverMoveKey.current !== key) {
-        serverMoveKey.current = key
-        localMode.current = false
-        const to = conductorPoint(actor.moving.to)
-        const serverEnd = Date.parse(actor.moving.started_at) + actor.moving.duration_s * 1000
-        serverTransition.current = {
-          route: routeBetween(visualPosition.current, to),
-          startedAt: Date.now(),
-          durationMs: Math.max(120, serverEnd - Date.now()),
-        }
-      }
-      const transition = serverTransition.current
-      if (transition) {
-        const progress = Math.max(0, Math.min(1, (Date.now() - transition.startedAt) / transition.durationMs))
-        const point = pointAlong(transition.route, progress)
-        visualPosition.current = { x: point.x, y: FLOOR_Y, z: point.z }
-        group.current.rotation.y = point.heading
-        moving = progress < 1
-      }
+      // The server records which anchor was reached; it must not move the model.
+      // The visible position is controlled only by the joystick.
+      localMode.current = true
     } else {
-      if (serverMoveKey.current) {
-        serverMoveKey.current = ''
-        serverTransition.current = null
-        visualPosition.current = conductorPoint(actor.at)
-      }
-      if (freeTarget && freeTarget.request !== handledFreeRequest.current) {
-        handledFreeRequest.current = freeTarget.request
-        // Walk to the tapped floor point along a path around furniture and walls.
-        const grid = getActiveNavGrid()
-        const target = grid ? nearestFree(grid, freeTarget) : aislePoint(freeTarget.z)
-        localRoute.current = routeBetween(visualPosition.current, target)
-        localTravelled.current = 0
-        localMode.current = true
-      }
       const stick = joystick.current
       const strength = Math.min(1, Math.hypot(stick.x, stick.y))
       if (stick.active && strength > 0.15) {
@@ -216,20 +172,9 @@ function Conductor({ actor, freeTarget, playerPosition, joystick }: { actor: Wag
           if (walkable(candidate.x, candidate.z)) { next = candidate; break }
         }
         localMode.current = true
-        localRoute.current = null
         group.current.rotation.y = Math.atan2(dx, dz)
         if (next) {
           visualPosition.current = { x: next.x, y: FLOOR_Y, z: next.z }
-          moving = true
-        }
-      } else if (localMode.current && localRoute.current) {
-        const route = localRoute.current
-        const length = routeLengthOf(route)
-        localTravelled.current = Math.min(length, localTravelled.current + delta * WALK_SPEED)
-        const point = pointAlong(route, length === 0 ? 1 : localTravelled.current / length)
-        visualPosition.current = { x: point.x, y: FLOOR_Y, z: point.z }
-        if (localTravelled.current < length) {
-          group.current.rotation.y = point.heading
           moving = true
         }
       } else if (!localMode.current) {
@@ -366,7 +311,7 @@ function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onP
   return null
 }
 
-function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, onProject, joystick, playerPosition, onAwayChange }: WagonWorldProps & { freeTarget: FreeWalkTarget | null; onFreeTarget: (x: number, z: number) => void; onProject: (value: Marker[]) => void; joystick: MutableRefObject<JoystickState>; playerPosition: MutableRefObject<PlayerPosition> }) {
+function Scene({ snapshot, disabled, onAnchorPress, onProject, joystick, playerPosition, onAwayChange }: Omit<WagonWorldProps, 'onAnchorPress'> & { onAnchorPress: (anchor: WagonAnchor) => void; onProject: (value: Marker[]) => void; joystick: MutableRefObject<JoystickState>; playerPosition: MutableRefObject<PlayerPosition> }) {
   const modelScene = useWagonScene()
   // Game copy of the model: walkway blockers and the cab shell hidden, floor
   // layers ordered, walkability grid built.
@@ -380,21 +325,8 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <Suspense fallback={null}><ForestGround /></Suspense>
       <primitive object={wagonScene} />
       <WagonBlanket onPress={() => { if (!disabled) onAnchorPress(servicePointFor(snapshot.wagon_state.class_id)) }} />
-      <mesh
-        position={[0, FLOOR_Y + 0.012, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        onClick={(event) => {
-          event.stopPropagation()
-          // Drags belong to the joystick; only real taps walk to a point.
-          if (disabled || event.delta > CLICK_SLOP) return
-          onFreeTarget(event.point.x, event.point.z)
-        }}
-      >
-        <planeGeometry args={[3.4, AISLE_MAX_Z - AISLE_MIN_Z]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
       {snapshot.wagon_state.seats.map((seat) => <Suspense key={seat.anchor} fallback={null}><Passenger seat={seat} type={situations.get(seat.anchor)} onPress={() => { if (!disabled && situations.has(seat.anchor)) onAnchorPress(seat.anchor) }} /></Suspense>)}
-      <Conductor actor={snapshot.wagon_state.player} freeTarget={freeTarget} playerPosition={playerPosition} joystick={joystick} />
+      <Conductor actor={snapshot.wagon_state.player} playerPosition={playerPosition} joystick={joystick} />
       <CabFade scene={wagonScene as Group} playerPosition={playerPosition} />
       <AwayWatcher actor={snapshot.wagon_state.player} playerPosition={playerPosition} onAwayChange={onAwayChange} />
       <MarkerProjector snapshot={snapshot} onProject={onProject} />
@@ -405,25 +337,19 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
 
 export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true, onAwayChange }: WagonWorldProps) {
   const [markers, setMarkers] = useState<Marker[]>([])
-  const [freeTarget, setFreeTarget] = useState<FreeWalkTarget | null>(null)
-  // The onboarding hint goes away once the player has tapped anything.
+  // The onboarding hint goes away once the player has used the joystick or interacted.
   const [interacted, setInteracted] = useState(false)
-  const request = useRef(0)
-  const setVisualTarget = (x: number, z: number) => {
+  const handleAnchorPress = (anchor: WagonAnchor, fromJoystick = false) => {
     setInteracted(true)
-    request.current += 1
-    setFreeTarget({ x, z, request: request.current })
-  }
-  const handleAnchorPress = (anchor: WagonAnchor) => {
     const active = snapshot.active_situations.find((item) => item.seat_anchor === anchor)
     const seat = active ? snapshot.wagon_state.seats.find((item) => item.anchor === anchor) : undefined
     const target = conductorPoint(seat?.actor.at ?? anchor)
-    setVisualTarget(target.x, target.z)
-    onAnchorPress(anchor)
+    const nearby = Math.hypot(target.x - playerPosition.current.x, target.z - playerPosition.current.z) <= AWAY_DISTANCE
+    onAnchorPress(anchor, nearby, fromJoystick)
   }
 
   // Shadow joystick: appears where a drag starts, grey and translucent, and
-  // disappears on release. Taps without movement keep their old meaning.
+  // disappears on release. Taps can interact with nearby objects, never walk.
   const playerPosition = useRef<PlayerPosition>(interpolateConductor(snapshot.wagon_state.player))
   const joystick = useRef<JoystickState>({ active: false, x: 0, y: 0 })
   const [stick, setStick] = useState<{ ox: number; oy: number; kx: number; ky: number } | null>(null)
@@ -447,7 +373,7 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true,
       const distance = Math.hypot(point.x - here.x, point.z - here.z)
       if (distance < 0.9 && (!nearest || distance < nearest.distance)) nearest = { anchor, distance }
     }
-    if (nearest) approach(nearest.anchor)
+    if (nearest) approach(nearest.anchor, true)
   }
   const pan = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => !latest.current.disabled && Math.hypot(gesture.dx, gesture.dy) > JOYSTICK_DEAD_ZONE,
@@ -472,7 +398,7 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true,
   return (
     <View style={styles.container} {...pan.panHandlers}>
       <Canvas style={styles.canvas} shadows gl={canvasGl}>
-        <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} freeTarget={freeTarget} onAnchorPress={handleAnchorPress} onFreeTarget={setVisualTarget} onProject={setMarkers} joystick={joystick} playerPosition={playerPosition} onAwayChange={onAwayChange} /></Suspense>
+        <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} onAnchorPress={handleAnchorPress} onProject={setMarkers} joystick={joystick} playerPosition={playerPosition} onAwayChange={onAwayChange} /></Suspense>
       </Canvas>
       {stick && (
         <View pointerEvents="none" style={[styles.stickBase, { left: stick.ox - JOYSTICK_RADIUS - 8, top: stick.oy - JOYSTICK_RADIUS - 8 }]}>
@@ -484,7 +410,7 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true,
           <Text style={[styles.markerText, !marker.active && styles.markerTextQuiet]}>{marker.icon}</Text>
         </Pressable>
       ))}
-      {showHint && !interacted && <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Нажмите на пассажира или точку вагона</Text></View>}
+      {showHint && !interacted && <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Двигайтесь джойстиком, чтобы подойти к пассажиру</Text></View>}
       {!snapshot && <ActivityIndicator style={StyleSheet.absoluteFill} color={colors.primary} />}
     </View>
   )
