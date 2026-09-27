@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api } from '../api/client'
 import { navigate, setLiveSimulation, setPlayer, setShift, useAppDispatch, useAppSelector } from '../app/store'
@@ -10,6 +11,10 @@ export function HomePage() {
   const { auth, shift, liveSimulation, wagonSessionId } = useAppSelector((state) => state.app)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const wagonLevels = useQuery({ queryKey: ['wagon-levels'], queryFn: api.getWagonLevels })
+  const passedLevels = wagonLevels.data?.levels.filter((level) => level.status === 'passed').length ?? 0
+  const totalLevels = wagonLevels.data?.levels.length ?? 0
+  const wagonProgress = totalLevels ? Math.round((passedLevels / totalLevels) * 100) : 0
   useEffect(() => { api.profile().then((profile) => dispatch(setPlayer(profile.player))).catch(() => {}) }, [dispatch])
 
   async function startClassic() {
@@ -51,7 +56,7 @@ export function HomePage() {
       <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Модули обучения</Text><Pressable onPress={() => dispatch(navigate('scenarios'))}><Text style={styles.allLink}>Все →</Text></Pressable></View>
       <Pressable disabled={busy} onPress={() => dispatch(navigate('wagon_lobby'))} style={styles.moduleCard}>
         <View style={[styles.moduleIcon, styles.moduleIconBlue]}><Text style={styles.moduleIconText}>▣</Text></View>
-        <View style={styles.moduleBody}><Text style={styles.moduleTag}>НОВЫЙ РЕЖИМ</Text><Text style={styles.moduleTitle}>Real-time вагон</Text><Text style={styles.moduleText}>Свободное перемещение, живые ситуации и пассажиры</Text><View style={styles.moduleProgress}><View style={[styles.moduleProgressFill, { width: wagonSessionId ? '45%' : '4%' }]} /></View></View>
+        <View style={styles.moduleBody}><Text style={styles.moduleTag}>{passedLevels} ИЗ {totalLevels || '—'} УРОВНЕЙ</Text><Text style={styles.moduleTitle}>Real-time вагон</Text><Text style={styles.moduleText}>Свободное перемещение, живые ситуации и пассажиры</Text><View style={styles.moduleProgress}><View style={[styles.moduleProgressFill, { width: `${Math.max(wagonSessionId ? 4 : 0, wagonProgress)}%` }]} /></View></View>
         <Text style={styles.moduleArrow}>→</Text>
       </Pressable>
       <Pressable disabled={busy} onPress={shift?.session.status === 'active' ? () => dispatch(navigate('simulation')) : startClassic} style={styles.moduleCard}>

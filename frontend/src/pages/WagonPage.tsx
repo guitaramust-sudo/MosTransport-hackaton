@@ -185,7 +185,11 @@ export function WagonPage() {
   const finishShift = async () => {
     if (!sessionId) return
     setBusy(true)
-    try { dispatch(setWagonBreakdown(await api.finishSession(sessionId))) }
+    try {
+      const breakdown = await api.finishSession(sessionId)
+      await queryClient.invalidateQueries({ queryKey: ['wagon-levels'] })
+      dispatch(setWagonBreakdown(breakdown))
+    }
     catch (cause) { autoFinishStarted.current = false; setError(cause instanceof Error ? cause.message : 'Не удалось завершить смену'); setBusy(false) }
   }
 
