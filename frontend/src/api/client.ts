@@ -1,6 +1,6 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
-import type { AuthResult, Breakdown, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult } from '../types'
+import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult } from '../types'
 
 const expoHost = Constants.expoConfig?.hostUri?.split(':')[0]
 const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'localhost'
@@ -82,4 +82,11 @@ export const api = {
   sendMessage: (id: string, text: string) => request<TurnResult>(`/api/situation/${id}/message`, 'POST', { text }),
   escalate: (id: string, to: string) => request<{ escalations: string[] }>(`/api/situation/${id}/escalate`, 'POST', { to }),
   finishSituation: (id: string) => request<{ outcome: string }>(`/api/situation/${id}/finish`, 'POST', {}),
+  startLiveSimulation: () => request<LiveSimulation>('/api/session/simulations', 'POST', {}),
+  getLiveSimulation: (id: string) => request<LiveSimulation>(`/api/session/simulations/${id}`),
+  getLiveResult: (id: string) => request<LiveResult>(`/api/session/simulations/${id}/result`),
+  liveAction: (id: string, body: { command_id: string; expected_state_version: number; action_id?: string; event_id?: string; target?: string; choice_id?: string }) =>
+    request<LiveSimulation>(`/api/session/simulations/${id}/actions`, 'POST', body),
+  liveDialogue: (id: string, body: { command_id: string; expected_state_version: number; event_id: string; text: string }) =>
+    request<LiveSimulation>(`/api/session/simulations/${id}/dialogue`, 'POST', body),
 }

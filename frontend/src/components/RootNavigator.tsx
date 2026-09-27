@@ -8,11 +8,12 @@ import { HomePage } from '../pages/HomePage'
 import { ProfilePage } from '../pages/ProfilePage'
 import { ScenariosPage } from '../pages/ScenariosPage'
 import { SimulationPage } from '../pages/SimulationPage'
+import { LiveSimulationPage } from '../pages/LiveSimulationPage'
 import { BottomNav } from './BottomNav'
 
 export function RootNavigator() {
   const screen = useAppSelector((state) => state.app.screen)
-  const isFocusedMode = screen === 'auth' || screen === 'simulation' || screen === 'debrief'
+  const isFocusedMode = screen === 'auth' || screen === 'simulation' || screen === 'live_simulation' || screen === 'debrief'
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -21,6 +22,7 @@ export function RootNavigator() {
         {screen === 'home' && <HomePage />}
         {screen === 'scenarios' && <ScenariosPage />}
         {screen === 'simulation' && <SimulationPage />}
+        {screen === 'live_simulation' && <LiveSimulationPage />}
         {screen === 'debrief' && <DebriefPage />}
         {screen === 'profile' && <ProfilePage />}
         {!isFocusedMode && <BottomNav />}
@@ -33,4 +35,3 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.surface },
   app: { flex: 1, backgroundColor: '#F4F7F8' },
 })
-

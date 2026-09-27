@@ -1,7 +1,7 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { useDispatch, useSelector } from 'react-redux'
 import { setTokens } from '../api/client'
-import type { AppScreen, AuthResult, Breakdown, Player, SessionResponse } from '../types'
+import type { AppScreen, AuthResult, Breakdown, LiveSimulation, Player, SessionResponse } from '../types'
 
 interface AppState {
   screen: AppScreen
@@ -9,8 +9,9 @@ interface AppState {
   shift: SessionResponse | null
   situationId: string | null
   breakdown: Breakdown | null
+  liveSimulation: LiveSimulation | null
 }
-const initialState: AppState = { screen: 'auth', auth: null, shift: null, situationId: null, breakdown: null }
+const initialState: AppState = { screen: 'auth', auth: null, shift: null, situationId: null, breakdown: null, liveSimulation: null }
 const slice = createSlice({
   name: 'app', initialState,
   reducers: {
@@ -31,9 +32,14 @@ const slice = createSlice({
       if (state.shift) state.shift.session.status = 'finished'
       state.screen = 'debrief'
     },
+    setLiveSimulation(state, action: PayloadAction<LiveSimulation>) {
+      state.liveSimulation = action.payload
+      state.screen = 'live_simulation'
+    },
+    updateLiveSimulation(state, action: PayloadAction<LiveSimulation>) { state.liveSimulation = action.payload },
   },
 })
-export const { navigate, signedIn, signedOut, setShift, selectSituation, refreshShift, setBreakdown, setPlayer } = slice.actions
+export const { navigate, signedIn, signedOut, setShift, selectSituation, refreshShift, setBreakdown, setPlayer, setLiveSimulation, updateLiveSimulation } = slice.actions
 export const store = configureStore({ reducer: { app: slice.reducer } })
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch

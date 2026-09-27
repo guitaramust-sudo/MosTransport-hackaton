@@ -25,6 +25,6 @@ new flow is integrated with the client and its behavior is covered by tests.
 
 Release note: the bundled content and all scoring coefficients are provisional
 demo material. The new simulation API is playable and verified independently;
-the existing frontend still uses the legacy dialogue flow. An expert content
-review and client integration are separate follow-up work before professional
-training use.
+the frontend offers it as a separate screen alongside the legacy dialogue
+flow. An expert content review and deeper wagon-world integration remain
+follow-up work before professional training use.
