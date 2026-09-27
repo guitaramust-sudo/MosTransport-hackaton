@@ -77,7 +77,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: '#F4F7F8' },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: colors.soft },
   logo: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
   logoText: { color: colors.surface, fontSize: 22, fontWeight: '900' },
   title: { color: colors.ink, fontSize: 16, fontWeight: '800' },

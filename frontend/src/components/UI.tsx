@@ -26,7 +26,7 @@ export function ErrorText({ error }: { error: string | null }) {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#F4F7F8' },
+  page: { flex: 1, backgroundColor: colors.soft },
   content: { padding: 20, paddingBottom: 40 },
   kicker: { color: colors.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
   title: { color: colors.ink, fontSize: 30, fontWeight: '900', marginTop: 5, marginBottom: 18 },

@@ -1,6 +1,6 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
-import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult } from '../types'
+import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonClassId, WagonStartResponse } from '../types'
 
 const expoHost = Constants.expoConfig?.hostUri?.split(':')[0]
 const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'localhost'
@@ -11,8 +11,19 @@ const baseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? defaultBa
 let tokens: Tokens | null = null
 
 export function setTokens(value: Tokens | null) { tokens = value }
+export function getAccessToken() { return tokens?.access_token ?? null }
 
 export function getApiBaseUrl() { return baseUrl }
+
+export function getWagonWebSocketUrl(path: string) {
+  const token = getAccessToken()
+  const separator = path.includes('?') ? '&' : '?'
+  const authenticatedPath = `${path}${separator}token=${encodeURIComponent(token ?? '')}`
+  if (baseUrl) return `${baseUrl.replace(/^http/, 'ws')}${authenticatedPath}`
+  const location = (globalThis as typeof globalThis & { location?: { origin?: string } }).location
+  const origin = location?.origin?.replace(/^http/, 'ws') ?? ''
+  return `${origin}${authenticatedPath}`
+}
 
 function normalizeSituation(situation: Situation): Situation {
   return {
@@ -79,7 +90,8 @@ export const api = {
   getSession: async (id: string) => normalizeSession(await request<SessionResponse>(`/api/session/${id}`)),
   finishSession: async (id: string) => normalizeBreakdown(await request<Breakdown>(`/api/session/${id}/finish`, 'POST', {})),
   getSituation: async (id: string) => normalizeSituationResponse(await request<SituationResponse>(`/api/situation/${id}`)),
-  sendMessage: (id: string, text: string) => request<TurnResult>(`/api/situation/${id}/message`, 'POST', { text }),
+  sendMessage: (id: string, text: string, inputMode: 'text' | 'voice' = 'text') =>
+    request<TurnResult>(`/api/situation/${id}/message`, 'POST', { text, input_mode: inputMode }),
   escalate: (id: string, to: string) => request<{ escalations: string[] }>(`/api/situation/${id}/escalate`, 'POST', { to }),
   finishSituation: (id: string) => request<{ outcome: string }>(`/api/situation/${id}/finish`, 'POST', {}),
   startLiveSimulation: () => request<LiveSimulation>('/api/session/simulations', 'POST', {}),
@@ -89,4 +101,7 @@ export const api = {
     request<LiveSimulation>(`/api/session/simulations/${id}/actions`, 'POST', body),
   liveDialogue: (id: string, body: { command_id: string; expected_state_version: number; event_id: string; text: string }) =>
     request<LiveSimulation>(`/api/session/simulations/${id}/dialogue`, 'POST', body),
+  getWagonClasses: () => request<WagonClassesResponse>('/api/wagon/classes'),
+  startWagonSession: (classId: WagonClassId = 'standard') =>
+    request<WagonStartResponse>('/api/session/wagon/start', 'POST', { class_id: classId }),
 }

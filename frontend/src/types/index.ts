@@ -4,6 +4,8 @@ export type AppScreen =
   | "scenarios"
   | "simulation"
   | "live_simulation"
+  | "wagon_lobby"
+  | "wagon"
   | "debrief"
   | "profile";
 
@@ -49,12 +51,16 @@ export interface Situation {
   tone?: string;
   conveyed?: string[];
   missed?: string[];
+  seat_anchor?: WagonAnchor;
+  physical_requirement?: WagonPhysicalRequirement | null;
+  physical_action_done?: boolean;
 }
 export interface Session {
   id: string;
   status: "active" | "finished";
   created_at: string;
   finished_at: string | null;
+  wagon_state?: WagonState | null;
 }
 export interface SessionResponse {
   session: Session;
@@ -215,3 +221,81 @@ export interface GameQuest {
   priority: 'critical' | 'normal'
   seatIndex: number
 }
+
+export type WagonClassId = 'standard' | 'comfort' | 'business' | 'first'
+export type WagonClassStatus = 'available' | 'coming_soon'
+export type WagonAnchor =
+  | 'seat_1'
+  | 'seat_2'
+  | 'seat_3'
+  | 'seat_4'
+  | 'seat_5'
+  | 'seat_6'
+  | 'service_point'
+  | 'staff_zone'
+
+export type WagonItem = 'blanket' | 'water' | 'coffee'
+export type WagonSituationType = 'cold' | 'thirsty' | 'tired' | 'zone_intrusion' | string
+
+export interface WagonMove {
+  from: WagonAnchor
+  to: WagonAnchor
+  started_at: string
+  duration_s: number
+}
+
+export interface WagonActor {
+  at: WagonAnchor
+  moving?: WagonMove | null
+}
+
+export interface WagonSeat {
+  anchor: WagonAnchor
+  passenger_def_id: string
+  situation_id?: string | null
+  situation_def_id?: string | null
+  restricted_reached?: boolean
+  actor: WagonActor
+}
+
+export interface WagonState {
+  class_id: 'standard'
+  restricted_anchors: WagonAnchor[]
+  seats: WagonSeat[]
+  player: WagonActor
+  carried_items: WagonItem[] | null
+  started_at: string
+  duration_s: number
+}
+
+export interface WagonActiveSituation {
+  situation_id: string
+  seat_anchor: WagonAnchor
+  type: WagonSituationType
+  pool: string
+}
+
+export interface WagonSnapshot {
+  type: 'state'
+  game_time_s: number
+  wagon_state: WagonState
+  active_situations: WagonActiveSituation[]
+}
+
+export interface WagonError {
+  type: 'error'
+  message: string
+}
+
+export interface WagonStartResponse {
+  session_id: string
+  ws_path: string
+}
+
+export interface WagonClassesResponse {
+  classes: Record<WagonClassId, WagonClassStatus>
+}
+
+export type WagonPhysicalRequirement =
+  | { kind: 'deliver_item'; item: WagonItem }
+  | { kind: 'redirect' }

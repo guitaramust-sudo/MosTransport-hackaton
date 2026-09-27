@@ -4,6 +4,7 @@ import { MetricBar } from '../components/MetricBar'
 import { Button, Card, Page } from '../components/UI'
 import { Text } from '../components/Typography'
 import { colors } from '../helpers/theme'
+import { translateBackendField } from '../helpers/backendTranslations'
 
 const outcomeLabels: Record<string, string> = { success: 'Успех', partial: 'Частично', fail: 'Ошибка', timeout: 'Время вышло' }
 
@@ -15,7 +16,7 @@ export function DebriefPage() {
     {!breakdown ? <Text>Разбор пока недоступен.</Text> : <>
       <Card><Text style={styles.score}>{breakdown.total_xp > 0 ? '+' : ''}{breakdown.total_xp} XP</Text><Text style={styles.body}>Результат завершённой смены.</Text></Card>
       {breakdown.situations.map((item) => <Card key={item.situation_id}>
-        <Text style={styles.title}>{shift?.situations.find((situation) => situation.id === item.situation_id)?.scenario ?? item.code.replaceAll('_', ' ')}</Text>
+        <Text style={styles.title}>{shift?.situations.find((situation) => situation.id === item.situation_id)?.scenario ?? translateBackendField(item.code)}</Text>
         <Text style={styles.outcome}>{outcomeLabels[item.outcome] ?? item.outcome} · {item.xp} XP</Text>
         <MetricBar label="Безопасность" value={item.safety} tone="safety" />
         <MetricBar label="Лояльность" value={item.loyalty} tone="loyalty" />
