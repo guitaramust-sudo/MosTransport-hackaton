@@ -31,18 +31,20 @@ docker compose up --build
 неудачные смены и челлендж XP не меняют рейтинг. Коэффициенты служат только
 демонстрации; очки `demo` и `official` изолированы.
 
-Публичная регистрация всегда создаёт обычного пользователя. Администратора
-создаёт оператор отдельной локальной командой. Перед запуском задайте в своей
-оболочке `ADMIN_BOOTSTRAP_EMAIL` и `ADMIN_BOOTSTRAP_PASSWORD` (не добавляйте
-пароль в `.env` или Git), затем выполните из корня репозитория:
+Публичной регистрации больше нет — обычных пользователей теперь создаёт
+только администратор через `POST /admin/players` (email, username, password,
+`brigade_name`). Самого первого администратора создаёт оператор отдельной
+локальной командой. Задайте `ADMIN_BOOTSTRAP_EMAIL` и `ADMIN_BOOTSTRAP_PASSWORD`
+в `.env` (файл уже в `.gitignore`, руками ничего экспортировать не нужно),
+затем выполните из корня репозитория:
 
 ```bash
-docker compose run --rm -e ADMIN_BOOTSTRAP_EMAIL -e ADMIN_BOOTSTRAP_PASSWORD \
-  --entrypoint bootstrap-admin backend
+docker compose run --rm --entrypoint bootstrap-admin backend
 ```
 
 Для локального Go запуска: `go run ./cmd/bootstrap-admin` из `backend/` с теми
-же переменными и `DATABASE_URL`. Команда создаёт аккаунт либо повышает уже
+же переменными (экспортируйте их в оболочку — `go run` `.env` не читает) и
+`DATABASE_URL`. Команда создаёт аккаунт либо повышает уже
 существующий **только при совпадении его пароля**. После смены роли нужно
 войти заново; старый access-токен перестаёт действовать. `ADMIN_EMAILS` больше
 не используется.
@@ -115,15 +117,17 @@ go run ./cmd/server
 
 | Метод | Путь | Описание |
 |---|---|---|
-| POST | `/auth/register` | Регистрация |
-| POST | `/auth/login` | Логин, возвращает JWT |
+| POST | `/auth/login` | Логин, возвращает JWT (регистрации нет — аккаунт создаёт только админ) |
 | POST | `/auth/refresh` | Обновление пары токенов |
+| POST | `/admin/players` | Создать аккаунт игрока (email, username, password, `brigade_name`); только роль admin |
+| GET | `/admin/users/{id}/learning-summary` | Сводка по игроку: компетенции + прогресс по уровням вагона; только роль admin |
 | GET | `/api/profile` | Профиль текущего игрока |
 | GET | `/api/notifications` | Демонстрационные уведомления игрока |
 | GET | `/api/challenges/weekly` | Прогресс недельного демо-челленджа |
 | POST | `/api/session/start` | Начать смену |
 | GET | `/api/wagon/classes` | Список классов вагона и их доступность |
-| POST | `/api/session/wagon/start` | Начать смену в вагоне `standard` |
+| GET | `/api/wagon/levels` | Список уровней вагона: locked/unlocked/passed для текущего игрока |
+| POST | `/api/session/wagon/start` | Начать смену в вагоне по `level_id` |
 | WS | `/api/wagon/{id}/ws?token=...` | Снимки состояния и физические команды |
 | POST | `/api/session/simulations` | Начать демонстрационную смену с ветвлением |
 | GET | `/api/session/simulations/{id}` | Получить состояние новой смены |
