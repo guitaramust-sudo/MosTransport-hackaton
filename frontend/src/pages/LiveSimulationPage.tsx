@@ -19,6 +19,17 @@ function commandID() {
   })
 }
 
+function validationLabel(status: string) {
+  return status === 'draft' ? 'ЧЕРНОВИК' : status === 'approved' ? 'УТВЕРЖДЕНО' : status.toUpperCase()
+}
+
+function actionLabel(actionId: string, choice?: string) {
+  if (choice) return choice
+  if (actionId === 'timeout') return 'Время на ответ вышло'
+  if (actionId === 'talk') return 'Разговор с пассажиром'
+  return 'Действие проводника'
+}
+
 export function LiveSimulationPage() {
   const dispatch = useAppDispatch()
   const live = useAppSelector((state) => state.app.liveSimulation)
@@ -104,9 +115,12 @@ export function LiveSimulationPage() {
     }))
   }
 
+  // Show the choice's own wording instead of its id.
+  const choiceText = (id?: string) => live.events.flatMap((event) => event.choices).find((choice) => choice.id === id)?.text
+
   return <Page title="Живая симуляция">
     <Card>
-      <Text style={styles.kicker}>ДЕМО · {live.run.content_validation_status.toUpperCase()}</Text>
+      <Text style={styles.kicker}>ДЕМО · {validationLabel(live.run.content_validation_status)}</Text>
       <Text style={styles.heading}>{live.passenger.name || 'Пассажир'} · {live.passenger.temperament}</Text>
       <Text style={styles.body}>Запрос: {live.passenger.request}. Напряжение: {live.passenger.tension}/3.</Text>
       <Text style={styles.quote}>«{live.passenger.opening}»</Text>
@@ -150,7 +164,7 @@ export function LiveSimulationPage() {
         <Text style={styles.body}>Безопасность: {result.session_safety_score} · Лояльность: {result.loyalty}</Text>
         <Text style={styles.hint}>Разбор решений:</Text>
         {result.debrief.map((entry, index) => <View key={`${entry.event_id}-${index}`} style={styles.debrief}>
-          <Text style={styles.eventTitle}>{entry.player_text || entry.action_id}</Text>
+          <Text style={styles.eventTitle}>{entry.player_text || actionLabel(entry.action_id, choiceText(entry.effect_id))}</Text>
           {entry.passenger_reply && <Text style={styles.quote}>«{entry.passenger_reply}»</Text>}
           <Text style={styles.body}>{entry.explanation}</Text>
           {entry.better_options.length > 0 && <Text style={styles.hint}>Лучше: {entry.better_options.join('; ')}</Text>}
@@ -164,7 +178,7 @@ export function LiveSimulationPage() {
       {live.dialogue.map((turn) => <View key={turn.command_id} style={styles.turn}>
         <Text style={styles.eventTitle}>Вы: {turn.player}</Text>
         <Text style={styles.body}>{live.passenger.name}: {turn.passenger}</Text>
-        {turn.choice_id && <Text style={styles.hint}>Решение: {turn.choice_id}</Text>}
+        {turn.choice_id && <Text style={styles.hint}>Решение: {choiceText(turn.choice_id) ?? 'выбран вариант действия'}</Text>}
       </View>)}
     </Card>}
     <ErrorText error={error} />

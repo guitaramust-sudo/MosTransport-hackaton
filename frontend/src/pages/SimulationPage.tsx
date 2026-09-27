@@ -6,6 +6,7 @@ import { GameWorld } from '../components/GameWorld'
 import { MetricBar } from '../components/MetricBar'
 import { Text, TextInput } from '../components/Typography'
 import { colors, radius, shadow } from '../helpers/theme'
+import { translateBackendField } from '../helpers/backendTranslations'
 import type { GameQuest, SessionResponse, Situation, SituationResponse } from '../types'
 
 const escalationTargets = [
@@ -23,7 +24,7 @@ function isCritical(code: string) {
 function toQuest(situation: Situation, seatIndex: number): GameQuest {
   return {
     id: situation.id,
-    title: situation.scenario || situation.name || situation.code.replaceAll('_', ' '),
+    title: situation.scenario || translateBackendField(situation.code, 'Обращение пассажира'),
     location: seatLabels[seatIndex % seatLabels.length],
     priority: isCritical(situation.code) ? 'critical' : 'normal',
     seatIndex,
