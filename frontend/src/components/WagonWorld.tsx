@@ -63,6 +63,7 @@ function routeLengthOf(route: FloorPoint[]) {
 
 function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSituationType; onPress: () => void }) {
   const group = useRef<Group>(null)
+  const interaction = useRef<Group>(null)
   const model = useGLTF(passengerAssetFor(seat.passenger_def_id)) as unknown as { scene: Group; animations: AnimationClip[] }
   // GLTFLoader caches the source scene. Every passenger needs independent bones
   // and animation actions, even when two seats use the same character variant.
@@ -82,11 +83,11 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
     if (!group.current) return
     const position = interpolateWagonActor(seat.actor)
     const seated = seat.actor.at.startsWith('seat_') && !seat.actor.moving
-    // The animation moves the hips 46 cm toward the seat back. These anchors
-    // mark seat centres, so nudge the model toward the aisle and cushion.
+    // Every seat faces +Z. The seated clip shifts the hips 46 cm toward the
+    // backrest, so its root belongs at the front edge of the chair.
     seatBlend.current += ((seated ? 1 : 0) - seatBlend.current) * Math.min(1, delta * 5)
-    const aisleSide = seat.anchor.endsWith('1') || seat.anchor.endsWith('3') || seat.anchor.endsWith('5') ? 1 : -1
-    group.current.position.set(position.x + aisleSide * 0.18 * seatBlend.current, position.y - 0.08 * seatBlend.current, position.z)
+    group.current.position.set(position.x, position.y - 0.08 * seatBlend.current, position.z + 0.52 * seatBlend.current)
+    if (interaction.current) interaction.current.position.z = -0.46 * seatBlend.current
     const mode = seat.actor.moving ? 'moving' : seated ? 'seated' : 'standing'
     if (mode !== previousMode.current) {
       if (mode === 'seated' && previousMode.current !== null) sitUntil.current = Date.now() + 2000
@@ -110,15 +111,17 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
         currentAction.current = animation
       }
     }
-    group.current.rotation.y = seated ? aisleSide * Math.PI / 2 : position.heading
+    group.current.rotation.y = seated ? 0 : position.heading
     group.current.rotation.z = type === 'cold' ? Math.sin(clock.elapsedTime * 9) * 0.02 : 0
   })
 
   return (
     <group ref={group} onClick={(event) => { event.stopPropagation(); if (event.delta <= CLICK_SLOP) onPress() }}>
       <primitive object={scene} />
-      <mesh position={[0, 0.58, 0]}><sphereGeometry args={[0.42, 12, 12]} /><meshBasicMaterial transparent opacity={0} /></mesh>
-      {type && <mesh position={[0, 1.72, 0]}><sphereGeometry args={[0.075, 16, 16]} /><meshStandardMaterial color={type === 'zone_intrusion' ? colors.critical : colors.loyalty} emissive={type === 'zone_intrusion' ? colors.critical : colors.primary} emissiveIntensity={1.1} /></mesh>}
+      <group ref={interaction}>
+        <mesh position={[0, 0.58, 0]}><sphereGeometry args={[0.42, 12, 12]} /><meshBasicMaterial transparent opacity={0} /></mesh>
+        {type && <mesh position={[0, 1.72, 0]}><sphereGeometry args={[0.075, 16, 16]} /><meshStandardMaterial color={type === 'zone_intrusion' ? colors.critical : colors.loyalty} emissive={type === 'zone_intrusion' ? colors.critical : colors.primary} emissiveIntensity={1.1} /></mesh>}
+      </group>
     </group>
   )
 }
