@@ -3,12 +3,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api, getWagonWebSocketUrl } from '../api/client'
 import { lessonPracticeFinished, navigate, setWagonBreakdown, setWagonConnection, setWagonSelectedSituation, updateWagonSnapshot, useAppDispatch, useAppSelector } from '../app/store'
+import { Icon, type IconName } from '../components/Icon'
 import { Text, TextInput } from '../components/Typography'
 import { WagonWorld } from '../components/WagonWorld'
 import { colors, radius, shadow } from '../helpers/theme'
 import { translateBackendField, translateBackendText } from '../helpers/backendTranslations'
 import { objectsAtAnchor, pointsOfInterestFor, servicePointFor, wagonAnchorLabels, wagonItemLabels, wagonObjectLabels, wagonSituationIcon } from '../helpers/wagonMap'
 import type { SessionResponse, WagonActiveSituation, WagonAnchor, WagonError, WagonItem, WagonSnapshot } from '../types'
+
+const INVENTORY_SLOTS = 3
+
+function itemIcon(item: WagonItem): IconName {
+  return item === 'blanket' ? 'blanket' : item === 'coffee' ? 'coffee' : 'water'
+}
 
 type WagonCommand =
   | { type: 'move_to'; anchor: WagonAnchor }
@@ -245,6 +252,30 @@ export function WagonPage() {
   // Alert.alert is a no-op on web, so the pause menu is an in-game sheet.
   const openMenu = () => setMenuOpen(true)
 
+  // Lesson practice ends by itself: when every visit/inspect goal is done, or,
+  // for a conversation lesson, when the passenger's request has been closed.
+  const sawSituation = useRef(false)
+  const lessonFinishTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!isLessonPractice || !snapshot || !lesson.data || autoFinishStarted.current) return
+    const visitedNow = snapshot.wagon_state.visited_anchors ?? []
+    const inspectedNow = snapshot.wagon_state.inspected_objects ?? []
+    const { required_anchor_ids: anchors, required_object_ids: objects } = lesson.data
+    let done = false
+    if (anchors.length + objects.length > 0) {
+      done = anchors.every((id) => visitedNow.includes(id as WagonAnchor)) && objects.every((id) => inspectedNow.includes(id))
+    } else {
+      if (snapshot.active_situations.length > 0) sawSituation.current = true
+      done = sawSituation.current && snapshot.active_situations.length === 0 && !selectedId
+    }
+    if (!done) return
+    autoFinishStarted.current = true
+    showToast('Все задачи выполнены')
+    // Kept in a ref: snapshot updates re-run this effect every second and must not cancel it.
+    lessonFinishTimer.current = setTimeout(() => void finishShift(), 1200)
+  }, [isLessonPractice, snapshot, lesson.data, selectedId])
+  useEffect(() => () => { if (lessonFinishTimer.current) clearTimeout(lessonFinishTimer.current) }, [])
+
   if (!sessionId) return null
   if (!snapshot) return (
     <View style={styles.loading}><View style={styles.vsm}><Text style={styles.vsmText}>ВСМ</Text></View><ActivityIndicator color={colors.primary} size="large" /><Text style={styles.loadingTitle}>Готовим вагон</Text><Text style={styles.loadingText}>{connectionLabel(connection)}</Text>{error && <Text style={styles.errorText}>{error}</Text>}</View>
@@ -284,6 +315,14 @@ export function WagonPage() {
     ? (objectsAtAnchor[player.at] ?? []).filter((object) => !inspected.has(object) && (lesson.data?.required_object_ids ?? []).includes(object))
     : []
 
+  // The inventory opens the service point, where items are picked up.
+  const openInventory = () => {
+    setServiceContext(null)
+    setServiceRequested(true)
+    if (player.at === servicePoint && !player.moving) setShowService(true)
+    else sendCommand({ type: 'move_to', anchor: servicePoint })
+  }
+
   const sendPhysical = (command: WagonCommand) => {
     if (!sendCommand(command)) return
     setTimeout(() => { if (selectedId) void queryClient.invalidateQueries({ queryKey: ['wagon-situation', selectedId] }) }, 500)
@@ -292,24 +331,25 @@ export function WagonPage() {
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.game}>
-        <WagonWorld snapshot={snapshot} disabled={busy || Boolean(selectedId) || Boolean(pendingSituationId) || showService || Boolean(snapshot.wagon_state.player.moving)} onAnchorPress={handleAnchorPress} />
+        <WagonWorld snapshot={snapshot} disabled={busy || Boolean(selectedId) || Boolean(pendingSituationId) || showService || Boolean(snapshot.wagon_state.player.moving)} onAnchorPress={handleAnchorPress} showHint={!isLessonPractice} />
         <View style={styles.hud} pointerEvents="box-none">
           <View style={styles.topRow}>
             <View style={styles.brand}><Text style={styles.brandText}>ВСМ</Text><View><Text style={styles.shiftLabel}>СМЕНА В ПУТИ</Text><Text style={styles.timer}>{formatTime(remaining)}</Text></View></View>
             <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
           </View>
           <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
-          <View style={styles.statusRow}>
-            {connection !== 'connected' ? <View style={[styles.connection, styles.connectionWarn]}><View style={[styles.connectionDot, styles.connectionDotWarn]} /><Text style={styles.connectionText}>{connectionLabel(connection)}</Text></View> : <View />}
-            <Pressable disabled={Boolean(snapshot.wagon_state.player.moving)} onPress={() => { setServiceContext(null); setServiceRequested(true); if (snapshot.wagon_state.player.at === servicePoint && !snapshot.wagon_state.player.moving) setShowService(true); else sendCommand({ type: 'move_to', anchor: servicePoint }) }} style={styles.inventory}><Text style={styles.inventoryText}>▣ {carried.length}/3</Text></Pressable>
-          </View>
+          {connection !== 'connected' && (
+            <View style={styles.statusRow}>
+              <View style={[styles.connection, styles.connectionWarn]}><View style={[styles.connectionDot, styles.connectionDotWarn]} /><Text style={styles.connectionText}>{connectionLabel(connection)}</Text></View>
+            </View>
+          )}
           {isLessonPractice && lesson.data && (() => {
             // One task at a time keeps the wagon visible; the counter shows the rest.
             const next = goals.find((goal) => !goal.done)
             return (
               <View style={styles.goals}>
                 <View style={styles.goalsTop}>
-                  <Text style={styles.goalsKicker}>УРОК {lesson.data.lesson_id} · {lesson.data.title.toUpperCase()}</Text>
+                  <Text style={styles.goalsKicker}>ЗАДАНИЯ</Text>
                   {goals.length > 0 && <Text style={styles.goalsCount}>{goalsDone}/{goals.length}</Text>}
                 </View>
                 {goals.length === 0 ? (
@@ -336,18 +376,27 @@ export function WagonPage() {
           {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Подходим к пассажиру…</Text></View>}
         </View>
       </View>
-      {isLessonPractice && !selectedId && !showService && (
+      {isLessonPractice && !selectedId && !showService && inspectHere.length > 0 && (
         <View style={styles.lessonBar} pointerEvents="box-none">
           {inspectHere.map((object) => (
             <Pressable key={object} accessibilityRole="button" onPress={() => sendCommand({ type: 'inspect', item: object })} style={styles.inspectButton}>
               <Text style={styles.inspectText}>Осмотреть: {wagonObjectLabels[object] ?? object}</Text>
             </Pressable>
           ))}
-          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void finishShift()}
-            style={[styles.finishPractice, goals.length > 0 && goalsDone < goals.length && styles.finishPracticeQuiet]}>
-            <Text style={[styles.finishPracticeText, goals.length > 0 && goalsDone < goals.length && styles.finishPracticeTextQuiet]}>Завершить практику</Text>
-          </Pressable>
         </View>
+      )}
+      {!selectedId && !showService && !menuOpen && (
+        <Pressable accessibilityRole="button" accessibilityLabel={`Инвентарь: ${carried.length} из ${INVENTORY_SLOTS}. Открыть сервисную точку`}
+          disabled={Boolean(snapshot.wagon_state.player.moving)} onPress={openInventory} style={styles.inventoryBar}>
+          {Array.from({ length: INVENTORY_SLOTS }, (_, i) => carried[i]).map((item, i) => (
+            <View key={i} style={[styles.slot, !item && styles.slotEmpty]}>
+              {item ? <>
+                <Icon name={itemIcon(item)} size={24} color={colors.primary} />
+                <Text style={styles.slotLabel} numberOfLines={1}>{wagonItemLabels[item]}</Text>
+              </> : <Text style={styles.slotEmptyText}>Пусто</Text>}
+            </View>
+          ))}
+        </Pressable>
       )}
       {error && <Pressable onPress={() => setError(null)} style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text><Text style={styles.errorClose}>×</Text></Pressable>}
 
@@ -405,9 +454,8 @@ export function WagonPage() {
               <View><Text style={styles.sheetKicker}>ПАУЗА</Text><Text style={styles.sheetTitle}>{isLessonPractice ? 'Практика урока' : 'Смена в вагоне'}</Text></View>
               <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={() => setMenuOpen(false)} style={styles.close}><Text style={styles.closeText}>×</Text></Pressable>
             </View>
-            <Text style={styles.sheetHint}>Можно выйти на главную и вернуться к этому рейсу позже.</Text>
+            <Text style={styles.sheetHint}>{isLessonPractice ? 'Практика завершится сама, когда все задачи выполнены. Можно закончить и раньше — незавершённые задачи попадут в разбор.' : 'Смену можно закончить досрочно — результат попадёт в разбор.'}</Text>
             <Pressable accessibilityRole="button" onPress={() => setMenuOpen(false)} style={[styles.menuAction, styles.menuActionPrimary]}><Text style={styles.menuActionPrimaryText}>Продолжить</Text></Pressable>
-            <Pressable accessibilityRole="button" onPress={() => { setMenuOpen(false); dispatch(navigate('home')) }} style={styles.menuAction}><Text style={styles.menuActionText}>На главную</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setMenuOpen(false); void finishShift() }} style={styles.menuAction}><Text style={styles.menuActionDanger}>{isLessonPractice ? 'Завершить практику' : 'Завершить смену'}</Text></Pressable>
           </View>
         </View>
@@ -420,13 +468,12 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#DCE8F4' }, game: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.soft }, vsm: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }, vsmText: { color: '#FFF', fontSize: 23, fontWeight: '900' }, loadingTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' }, loadingText: { color: colors.muted }, errorText: { color: colors.critical, textAlign: 'center', padding: 16 },
   hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] },
-  progressTrack: { height: 7, overflow: 'hidden', borderRadius: 9, backgroundColor: 'rgba(255,255,255,.85)', borderWidth: 1, borderColor: 'rgba(16,26,61,.14)', marginTop: 9 }, progressFill: { height: '100%', borderRadius: 9, backgroundColor: colors.loyalty }, statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, inventory: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 99, backgroundColor: colors.primary }, inventoryText: { color: '#FFF', fontSize: 12, fontWeight: '900' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  progressTrack: { height: 7, overflow: 'hidden', borderRadius: 9, backgroundColor: 'rgba(255,255,255,.85)', borderWidth: 1, borderColor: 'rgba(16,26,61,.14)', marginTop: 9 }, progressFill: { height: '100%', borderRadius: 9, backgroundColor: colors.loyalty }, statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   menuAction: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, marginTop: 10 },
   menuActionPrimary: { backgroundColor: colors.action, borderColor: colors.action },
   menuActionPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
-  menuActionText: { color: colors.ink, fontSize: 15, fontWeight: '600' },
   menuActionDanger: { color: colors.errorInk, fontSize: 15, fontWeight: '600' },
-  goals: { marginTop: 8, alignSelf: 'flex-start', minWidth: 230, maxWidth: 340, borderRadius: 18, padding: 12, backgroundColor: 'rgba(255,255,255,.95)', ...shadow },
+  goals: { marginTop: 10, alignSelf: 'center', minWidth: 240, maxWidth: 360, borderRadius: 18, padding: 12, backgroundColor: 'rgba(255,255,255,.95)', ...shadow },
   goalsTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 },
   goalsKicker: { flex: 1, color: colors.primary, fontSize: 10, fontWeight: '700', letterSpacing: .6 },
   goalsCount: { color: colors.action, fontSize: 12, fontWeight: '700' },
@@ -437,13 +484,14 @@ const styles = StyleSheet.create({
   goalText: { flexShrink: 1, color: colors.ink, fontSize: 13, lineHeight: 18 },
   goalGo: { marginLeft: 'auto', color: colors.action, fontSize: 12, fontWeight: '600' },
   goalTextDone: { color: colors.muted, textDecorationLine: 'line-through' },
-  lessonBar: { position: 'absolute', left: 16, right: 16, bottom: 64, gap: 8, alignItems: 'center' },
+  lessonBar: { position: 'absolute', left: 16, right: 16, bottom: 104, gap: 8, alignItems: 'center' },
+  inventoryBar: { position: 'absolute', alignSelf: 'center', bottom: 20, flexDirection: 'row', gap: 8, padding: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,.95)', ...shadow },
+  slot: { width: 72, height: 60, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, backgroundColor: colors.blueSoft },
+  slotEmpty: { backgroundColor: 'transparent', borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.border },
+  slotLabel: { color: colors.primary, fontSize: 11, fontWeight: '600' },
+  slotEmptyText: { color: colors.faint, fontSize: 11, fontWeight: '500' },
   inspectButton: { minHeight: 48, maxWidth: 420, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.action, ...shadow },
   inspectText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
-  finishPractice: { minHeight: 44, maxWidth: 420, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
-  finishPracticeQuiet: { backgroundColor: 'rgba(255,255,255,.94)', borderWidth: 1, borderColor: colors.border },
-  finishPracticeText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  finishPracticeTextQuiet: { color: colors.ink },
   errorBanner: { position: 'absolute', left: 18, right: 18, top: 132, zIndex: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, backgroundColor: colors.critical, padding: 12 }, errorBannerText: { flex: 1, color: '#FFF', fontSize: 12, fontWeight: '700' }, errorClose: { color: '#FFF', fontSize: 22, marginLeft: 8 },
   sheetBackdrop: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 40, justifyContent: 'flex-end', backgroundColor: 'rgba(8,16,46,.28)' }, sheet: { maxHeight: '74%', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 24, backgroundColor: colors.surface, ...shadow }, dialogSheet: { minHeight: '55%' }, sheetHandle: { width: 42, height: 5, borderRadius: 4, alignSelf: 'center', backgroundColor: '#D7DDE8', marginBottom: 16 }, sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, sheetKicker: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1 }, sheetTitle: { color: colors.ink, fontSize: 21, fontWeight: '900', marginTop: 3 }, close: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.soft }, closeText: { color: colors.muted, fontSize: 24, lineHeight: 26 }, sheetHint: { color: colors.muted, fontSize: 13, marginTop: 9 },
   itemRow: { flexDirection: 'row', gap: 8, marginTop: 16 }, itemCard: { flex: 1, minHeight: 112, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.soft }, itemSelected: { borderColor: '#A9D8B9', backgroundColor: '#ECF9F1' }, itemIcon: { color: colors.primary, fontSize: 24, fontWeight: '900' }, itemName: { color: colors.ink, fontSize: 13, fontWeight: '900', marginTop: 7 }, itemState: { color: colors.muted, fontSize: 10, marginTop: 4 },

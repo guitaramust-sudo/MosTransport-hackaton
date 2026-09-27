@@ -7,6 +7,7 @@ export type IconName =
   | 'home' | 'practice' | 'progress' | 'profile' | 'settings' | 'chevronRight' | 'chevronLeft'
   | 'close' | 'lock' | 'check' | 'star' | 'clock' | 'train' | 'route' | 'bell' | 'trophy'
   | 'flag' | 'logout' | 'shield' | 'chat' | 'play' | 'refresh' | 'target' | 'users' | 'help' | 'admin'
+  | 'water' | 'blanket' | 'coffee'
 
 const paths: Record<IconName, (color: string) => ReactNode> = {
   home: (c) => <><Path d="M3.5 10.5 12 4l8.5 6.5" stroke={c} /><Path d="M5.5 9v10a1 1 0 0 0 1 1H10v-5.5h4V20h3.5a1 1 0 0 0 1-1V9" stroke={c} /></>,
@@ -34,6 +35,9 @@ const paths: Record<IconName, (color: string) => ReactNode> = {
   target: (c) => <><Circle cx="12" cy="12" r="8" stroke={c} /><Circle cx="12" cy="12" r="4" stroke={c} /><Circle cx="12" cy="12" r=".8" fill={c} stroke={c} /></>,
   users: (c) => <><Circle cx="9" cy="8.5" r="3.5" stroke={c} /><Path d="M3 19.5c.8-3 3.1-4.5 6-4.5s5.2 1.5 6 4.5M16 5.2a3.5 3.5 0 0 1 0 6.6M17.5 15.2c1.8.5 3 1.9 3.5 4.3" stroke={c} /></>,
   help: (c) => <><Circle cx="12" cy="12" r="8.5" stroke={c} /><Path d="M9.7 9.5a2.4 2.4 0 1 1 3.4 2.2c-.7.3-1.1.9-1.1 1.6v.4" stroke={c} /><Circle cx="12" cy="16.8" r=".6" fill={c} stroke={c} /></>,
+  water: (c) => <Path d="M12 3.5c3 3.6 5.5 6.8 5.5 10A5.5 5.5 0 0 1 6.5 13.5c0-3.2 2.5-6.4 5.5-10Z" stroke={c} />,
+  blanket: (c) => <><Rect x="4" y="5" width="16" height="14" rx="2.5" stroke={c} /><Path d="M4 10h16M4 14.5h16M9 5v14" stroke={c} /></>,
+  coffee: (c) => <><Path d="M5 9h11v5.5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z" stroke={c} /><Path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16M8.5 3.5v2.5M12 3.5v2.5" stroke={c} /></>,
   admin: (c) => <><Path d="M12 3.5 19 6v5.5c0 4.3-3 7.6-7 9-4-1.4-7-4.7-7-9V6l7-2.5Z" stroke={c} /><Path d="m9 12 2 2 4-4" stroke={c} /></>,
 }
 
