@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@expo-google-fonts/golos-text": "^0.4.2",
+    "@expo-google-fonts/onest": "^0.4.2",
     "@expo/metro-runtime": "~57.0.16",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
@@ -27,6 +27,7 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
     "react-redux": "^9.2.0",
     "three": "^0.186.1"

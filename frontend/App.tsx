@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
-  GolosText_400Regular,
-  GolosText_500Medium,
-  GolosText_600SemiBold,
-  GolosText_700Bold,
-  GolosText_800ExtraBold,
-  GolosText_900Black,
+  Onest_400Regular,
+  Onest_500Medium,
+  Onest_600SemiBold,
+  Onest_700Bold,
+  Onest_800ExtraBold,
   useFonts,
-} from '@expo-google-fonts/golos-text'
+} from '@expo-google-fonts/onest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StatusBar } from 'expo-status-bar'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
@@ -28,12 +27,11 @@ const queryClient = new QueryClient({
 export default function App() {
   const [assetsReady, setAssetsReady] = useState(false)
   const [fontsReady, fontError] = useFonts({
-    GolosText_400Regular,
-    GolosText_500Medium,
-    GolosText_600SemiBold,
-    GolosText_700Bold,
-    GolosText_800ExtraBold,
-    GolosText_900Black,
+    Onest_400Regular,
+    Onest_500Medium,
+    Onest_600SemiBold,
+    Onest_700Bold,
+    Onest_800ExtraBold,
   })
 
   useEffect(() => {
@@ -79,8 +77,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: colors.soft },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: colors.background },
   logo: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
-  logoText: { color: colors.surface, fontSize: 22, fontWeight: '900' },
-  title: { color: colors.ink, fontSize: 16, fontWeight: '800' },
+  logoText: { color: colors.surface, fontSize: 22, fontWeight: '800' },
+  title: { color: colors.ink, fontSize: 16, fontWeight: '600' },
 })
