@@ -18,11 +18,12 @@ type WagonState struct {
 }
 
 type WagonSeat struct {
-	Anchor         string     `json:"anchor"`
-	PassengerDefID string     `json:"passenger_def_id"`
-	SituationID    *uuid.UUID `json:"situation_id,omitempty"`
-	SituationDefID *string    `json:"situation_def_id,omitempty"`
-	Actor          WagonActor `json:"actor"`
+	Anchor            string     `json:"anchor"`
+	PassengerDefID    string     `json:"passenger_def_id"`
+	SituationID       *uuid.UUID `json:"situation_id,omitempty"`
+	SituationDefID    *string    `json:"situation_def_id,omitempty"`
+	RestrictedReached bool       `json:"restricted_reached,omitempty"`
+	Actor             WagonActor `json:"actor"`
 }
 
 type WagonActor struct {
