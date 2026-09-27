@@ -15,6 +15,7 @@ import { Provider } from 'react-redux'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { store } from './src/app/store'
 import { RootNavigator } from './src/components/RootNavigator'
+import { PushNotificationsBridge } from './src/components/PushNotificationsBridge'
 import { preloadGameAssets } from './src/helpers/gameAssets'
 import { colors } from './src/helpers/theme'
 
@@ -69,6 +70,7 @@ export default function App() {
       <Provider store={store}>
         <QueryClientProvider client={queryClient}>
           <StatusBar style="dark" />
+          <PushNotificationsBridge />
           <RootNavigator />
         </QueryClientProvider>
       </Provider>

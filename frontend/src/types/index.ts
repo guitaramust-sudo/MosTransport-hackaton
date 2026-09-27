@@ -8,7 +8,8 @@ export type AppScreen =
   | "wagon"
   | "debrief"
   | "profile"
-  | "admin";
+  | "admin"
+  | "learning_map";
 
 export interface Player {
   id: string;

@@ -6,6 +6,7 @@ import { AuthPage } from '../pages/AuthPage'
 import { AdminPage } from '../pages/AdminPage'
 import { DebriefPage } from '../pages/DebriefPage'
 import { HomePage } from '../pages/HomePage'
+import { LearningMapPage } from '../pages/LearningMapPage'
 import { ProfilePage } from '../pages/ProfilePage'
 import { ScenariosPage } from '../pages/ScenariosPage'
 import { SimulationPage } from '../pages/SimulationPage'
@@ -24,6 +25,7 @@ export function RootNavigator() {
         {screen === 'auth' && <AuthPage />}
         {screen === 'admin' && <AdminPage />}
         {screen === 'home' && <HomePage />}
+        {screen === 'learning_map' && <LearningMapPage />}
         {screen === 'scenarios' && <ScenariosPage />}
         {screen === 'simulation' && <SimulationPage />}
         {screen === 'live_simulation' && <LiveSimulationPage />}

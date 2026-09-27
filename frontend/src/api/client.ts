@@ -89,6 +89,10 @@ export const api = {
   learningSummary: (id: string) => request<AdminLearningSummary>(`/admin/users/${encodeURIComponent(id)}/learning-summary`),
   approveSession: (id: string) => request<{ session_id: string; validation_status: string }>(`/admin/sessions/${encodeURIComponent(id)}/approve`, 'POST', {}),
   profile: async () => normalizeProfile(await request<Profile>('/api/profile')),
+  registerPushSubscription: (platform: 'android' | 'ios', deviceToken: string) =>
+    request<{ status: string }>('/api/me/push-subscriptions', 'POST', { platform, device_token: deviceToken }),
+  getLearningMap: () => request<{ chapters: Array<{ chapter_id: string; title: string; order: number; lessons: Array<{ lesson_id: string; title: string; order: number; status: 'locked' | 'unlocked' | 'completed' }> }> }>('/api/learning/map'),
+  getMyLearning: () => request<{ prize_balance: number; prize_next_expiry: string | null; shirt_threshold: number; shirt_progress: number }>('/api/me/learning'),
   startSession: async () => normalizeSession(await request<SessionResponse>('/api/session/start', 'POST', {})),
   getSession: async (id: string) => normalizeSession(await request<SessionResponse>(`/api/session/${id}`)),
   finishSession: async (id: string) => normalizeBreakdown(await request<Breakdown>(`/api/session/${id}/finish`, 'POST', {})),

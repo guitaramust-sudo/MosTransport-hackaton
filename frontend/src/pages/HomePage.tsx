@@ -54,6 +54,10 @@ export function HomePage() {
       </View>
 
       <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Модули обучения</Text><Pressable onPress={() => dispatch(navigate('scenarios'))}><Text style={styles.allLink}>Все →</Text></Pressable></View>
+      <Pressable onPress={() => dispatch(navigate('learning_map'))} style={styles.moduleCard}>
+        <View style={[styles.moduleIcon, styles.moduleIconBlue]}><Text style={styles.moduleIconText}>✦</Text></View>
+        <View style={styles.moduleBody}><Text style={styles.moduleTag}>МАРШРУТ</Text><Text style={styles.moduleTitle}>Уроки проводника</Text><Text style={styles.moduleText}>Открытые и пройденные уроки</Text></View><Text style={styles.moduleArrow}>→</Text>
+      </Pressable>
       <Pressable disabled={busy} onPress={() => dispatch(navigate('wagon_lobby'))} style={styles.moduleCard}>
         <View style={[styles.moduleIcon, styles.moduleIconBlue]}><Text style={styles.moduleIconText}>▣</Text></View>
         <View style={styles.moduleBody}><Text style={styles.moduleTag}>{passedLevels} ИЗ {totalLevels || '—'} УРОВНЕЙ</Text><Text style={styles.moduleTitle}>Real-time вагон</Text><Text style={styles.moduleText}>Свободное перемещение, живые ситуации и пассажиры</Text><View style={styles.moduleProgress}><View style={[styles.moduleProgressFill, { width: `${Math.max(wagonSessionId ? 4 : 0, wagonProgress)}%` }]} /></View></View>
