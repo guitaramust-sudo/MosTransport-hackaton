@@ -45,6 +45,23 @@ func (s *Store) UpdateWagonState(ctx context.Context, sessionID uuid.UUID, state
 	return nil
 }
 
+func (s *Store) ListActiveWagonSessions(ctx context.Context) ([]domain.Session, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+sessionColumns+` FROM sessions WHERE status = 'active' AND wagon_state IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []domain.Session
+	for rows.Next() {
+		var sess domain.Session
+		if err := rows.Scan(scanSession(&sess)...); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sess)
+	}
+	return sessions, rows.Err()
+}
+
 func (s *Store) GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error) {
 	var sess domain.Session
 	err := s.pool.QueryRow(ctx,
@@ -259,6 +276,17 @@ func (s *Store) AddEscalation(ctx context.Context, situationID uuid.UUID, target
 
 func (s *Store) SetPhysicalActionDone(ctx context.Context, situationID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE situations SET physical_action_done = true WHERE id = $1 AND status = 'active'`, situationID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return repo.ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) RecordRestrictedArrival(ctx context.Context, situationID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE situations SET passenger_params = jsonb_set(passenger_params, '{restricted_reached}', 'true'::jsonb, true) WHERE id = $1 AND status = 'active'`, situationID)
 	if err != nil {
 		return err
 	}

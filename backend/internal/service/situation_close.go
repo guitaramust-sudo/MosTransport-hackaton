@@ -163,6 +163,9 @@ func (s *SituationService) finishLoaded(ctx context.Context, sit domain.Situatio
 		}
 		timedOut := sit.TimerDeadline != nil && !now.Before(*sit.TimerDeadline)
 		result := EvaluateScore(scenario, observed, sit.Escalations, input.Elapsed, timedOut, sit.PhysicalActionDone)
+		if reached, _ := sit.PassengerParams["restricted_reached"].(bool); reached {
+			result = ApplyRestrictedArrivalPenalty(result)
+		}
 		remarksJSON, err := json.Marshal(result.Remarks)
 		if err != nil {
 			return err

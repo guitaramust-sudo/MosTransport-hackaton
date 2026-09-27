@@ -30,17 +30,32 @@ type ScoreSummary struct {
 }
 
 var remarkTable = map[string]Remark{
-	"fast":             {"fast", 15, 0, 5, "Быстрое решение"},
-	"on_time":          {"on_time", 5, 0, 0, "Уложился в регламентное время"},
-	"timeout":          {"timeout", -20, -10, -10, "Не успел закрыть ситуацию"},
-	"escalation_ok":    {"escalation_ok", 10, 15, 0, "Эскалация выполнена верно"},
-	"no_escalation":    {"no_escalation", -40, -40, 0, "Обязательная эскалация не выполнена"},
-	"false_escalation": {"false_escalation", -15, -10, 0, "Эскалация не требовалась"},
-	"wrong_target":     {"wrong_target", -10, -5, 0, "Вызван неверный адресат"},
-	"empathic":         {"empathic", 5, 0, 10, "Эмпатичное общение"},
-	"rude":             {"rude", -30, 0, -25, "Грубое общение с пассажиром"},
-	"missed_point":     {"missed_point", -10, 0, -5, "Пропущен пункт"},
-	"solved":           {"solved", 20, 10, 15, "Ситуация решена"},
+	"fast":               {"fast", 15, 0, 5, "Быстрое решение"},
+	"on_time":            {"on_time", 5, 0, 0, "Уложился в регламентное время"},
+	"timeout":            {"timeout", -20, -10, -10, "Не успел закрыть ситуацию"},
+	"escalation_ok":      {"escalation_ok", 10, 15, 0, "Эскалация выполнена верно"},
+	"no_escalation":      {"no_escalation", -40, -40, 0, "Обязательная эскалация не выполнена"},
+	"false_escalation":   {"false_escalation", -15, -10, 0, "Эскалация не требовалась"},
+	"wrong_target":       {"wrong_target", -10, -5, 0, "Вызван неверный адресат"},
+	"empathic":           {"empathic", 5, 0, 10, "Эмпатичное общение"},
+	"rude":               {"rude", -30, 0, -25, "Грубое общение с пассажиром"},
+	"missed_point":       {"missed_point", -10, 0, -5, "Пропущен пункт"},
+	"solved":             {"solved", 20, 10, 15, "Ситуация решена"},
+	"restricted_reached": {"restricted_reached", -15, -20, -5, "Пассажир достиг служебной зоны"},
+}
+
+// ApplyRestrictedArrivalPenalty records a safety violation even if the
+// passenger is redirected later. Legacy situations never set this flag.
+func ApplyRestrictedArrivalPenalty(result ScoreSummary) ScoreSummary {
+	r := remarkTable["restricted_reached"]
+	result.Remarks = append(result.Remarks, r)
+	result.XP += r.XP
+	result.Safety = clamp(result.Safety+r.Safety, 0, 100)
+	result.Loyalty = clamp(result.Loyalty+r.Loyalty, 0, 100)
+	if result.Outcome == "success" {
+		result.Outcome = "partial"
+	}
+	return result
 }
 
 // EvaluateScore is pure: the model reports facts, while outcome, remarks,

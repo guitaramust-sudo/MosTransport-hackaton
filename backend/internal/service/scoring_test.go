@@ -119,3 +119,10 @@ func TestPhysicalActionRequiresServerConfirmation(t *testing.T) {
 		t.Fatalf("confirmed action missed: %+v", done)
 	}
 }
+
+func TestRestrictedArrivalCannotBeUndoneByRedirect(t *testing.T) {
+	result := ApplyRestrictedArrivalPenalty(ScoreSummary{Outcome: "success", Safety: 70, Loyalty: 70, XP: 25})
+	if result.Outcome != "partial" || result.Safety != 50 || result.XP != 10 || len(result.Remarks) != 1 {
+		t.Fatalf("penalty missing: %+v", result)
+	}
+}
