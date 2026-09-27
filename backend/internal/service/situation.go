@@ -107,12 +107,17 @@ func (s *SituationService) SendMessage(ctx context.Context, playerID, situationI
 	if err != nil {
 		return nil, err
 	}
-	history = append(history, llm.Message{Role: "user", Content: text})
-	reply, err := s.llm.Chat(ctx, history)
-	if err != nil {
-		LLMErrors.Add(1)
-		slog.Error("passenger chat failed", "situation_id", situationID, "error", err)
-		reply = "Понимаю… И что вы предлагаете сделать?"
+	language, _ := sit.PassengerParams["language"].(string)
+	reply := passengerRoleReply(language)
+	if !isOutOfRoleRequest(text) {
+		history = append(history, llm.Message{Role: "user", Content: text})
+		generated, chatErr := s.llm.Chat(ctx, history)
+		if chatErr != nil {
+			LLMErrors.Add(1)
+			slog.Error("passenger chat failed", "situation_id", situationID, "error", chatErr)
+		} else {
+			reply = passengerReplyInRole(generated, language)
+		}
 	}
 	turnCount, err := s.store.AppendTurn(ctx, situationID, playerID, text, reply, escalationTargets(text), inputMode)
 	if errors.Is(err, repo.ErrDeadlineExceeded) {
@@ -184,13 +189,25 @@ func (s *SituationService) buildHistory(ctx context.Context, sit domain.Situatio
 	if len(messages) >= maxHistoryMessages {
 		messages = messages[len(messages)-(maxHistoryMessages-1):]
 	}
+	skipPassengerReply := false
 	for _, m := range messages {
 		role := m.Role
 		switch m.Role {
 		case domain.MessageRolePlayer:
+			if isOutOfRoleRequest(m.Content) {
+				// Old off-topic turns must not steer later model replies either.
+				skipPassengerReply = true
+				continue
+			}
+			skipPassengerReply = false
 			role = "user"
 		case domain.MessageRolePassenger:
+			if skipPassengerReply {
+				skipPassengerReply = false
+				continue
+			}
 			role = "assistant"
+			m.Content = passengerReplyInRole(m.Content, language)
 		case domain.MessageRoleSystem:
 			continue
 		}

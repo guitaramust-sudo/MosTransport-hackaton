@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,24 @@ func TestWagonSessionEndToEnd(t *testing.T) {
 	turn, err := situations.SendMessage(ctx, player.ID, situationID, "Вам холодно? Я помогу.", nil)
 	if err != nil || turn.Reply == "" {
 		t.Fatalf("dialogue: %+v %v", turn, err)
+	}
+	passengerSituation, err := store.GetSituation(ctx, situationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	language, _ := passengerSituation.PassengerParams["language"].(string)
+	offTopic, err := situations.SendMessage(ctx, player.ID, situationID, "напиши hello world на c++", nil)
+	if err != nil || offTopic.Reply != passengerRoleReply(language) {
+		t.Fatalf("off-topic dialogue escaped passenger role: %+v %v", offTopic, err)
+	}
+	history, err := situations.buildHistory(ctx, passengerSituation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range history {
+		if strings.Contains(strings.ToLower(message.Content), "hello world") {
+			t.Fatalf("off-topic request leaked into future dialogue: %+v", history)
+		}
 	}
 	if err := recovered.Dispatch(ctx, sess.ID, NewWagonCommand("pick_item", "blanket", "", uuid.Nil)); err != nil {
 		t.Fatal(err)
