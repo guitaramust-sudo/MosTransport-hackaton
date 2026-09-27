@@ -11,8 +11,8 @@ func TestEmbeddedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(c.Scenarios); got != 50 {
-		t.Fatalf("scenario count = %d, want 50", got)
+	if got := len(c.Scenarios); got != 54 {
+		t.Fatalf("scenario count = %d, want 54", got)
 	}
 	if got := len(c.Passengers); got != 50 {
 		t.Fatalf("passenger count = %d, want 50", got)
@@ -21,6 +21,27 @@ func TestEmbeddedCatalog(t *testing.T) {
 		if p.Language != "ru" && p.Language != "en" {
 			t.Fatalf("passenger %s has unsupported language %q", p.ID, p.Language)
 		}
+	}
+}
+
+func TestWagonScenariosArePresent(t *testing.T) {
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"cold": "blanket", "thirsty": "water", "tired": "coffee", "zone_intrusion": ""}
+	for _, s := range c.Scenarios {
+		item, ok := want[s.ID]
+		if !ok {
+			continue
+		}
+		if s.PhysicalRequirement == nil || s.PhysicalRequirement.Item != item {
+			t.Fatalf("%s: bad physical requirement: %+v", s.ID, s.PhysicalRequirement)
+		}
+		delete(want, s.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing wagon scenarios: %v", want)
 	}
 }
 
