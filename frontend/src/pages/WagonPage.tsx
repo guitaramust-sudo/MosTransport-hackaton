@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAudioPlayer } from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api, getWagonWebSocketUrl } from '../api/client'
@@ -54,6 +55,31 @@ function connectionLabel(status: string) {
 export function WagonPage() {
   const dispatch = useAppDispatch()
   const queryClient = useQueryClient()
+  const musicPlayer = useAudioPlayer(require('../../assets/audio/wagon_ambient.mp3'))
+  const [musicEnabled, setMusicEnabled] = useState(true)
+
+  useEffect(() => {
+    musicPlayer.loop = true
+    // The recording is quiet as well, for browsers that ignore the volume API.
+    musicPlayer.volume = 0.35
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Browsers allow sound after a gesture; starting the shift may be asynchronous.
+      const startOnGesture = () => musicPlayer.play()
+      document.addEventListener('pointerdown', startOnGesture, { once: true })
+      return () => {
+        document.removeEventListener('pointerdown', startOnGesture)
+        musicPlayer.pause()
+      }
+    }
+    musicPlayer.play()
+    return () => musicPlayer.pause()
+  }, [musicPlayer])
+
+  const toggleMusic = () => {
+    if (musicEnabled) musicPlayer.pause()
+    else musicPlayer.play()
+    setMusicEnabled(!musicEnabled)
+  }
   const { wagonSessionId: sessionId, wagonWsPath: wsPath, wagonSnapshot: snapshot, wagonConnection: connection, wagonSelectedSituationId: selectedId, lessonId, lessonPracticeSessionId } = useAppSelector((state) => state.app)
   const isLessonPractice = Boolean(sessionId && lessonId && lessonPracticeSessionId === sessionId)
   const lesson = useQuery({ queryKey: ['lesson', lessonId], queryFn: () => api.lesson(lessonId!), enabled: isLessonPractice })
@@ -344,7 +370,10 @@ export function WagonPage() {
         <View style={styles.hud} pointerEvents="box-none">
           <View style={styles.topRow}>
             <View style={styles.brand}><Text style={styles.brandText}>ВСМ</Text><View><Text style={styles.shiftLabel}>СМЕНА В ПУТИ</Text><Text style={styles.timer}>{formatTime(remaining)}</Text></View></View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
+            <View style={styles.topActions}>
+              <Pressable accessibilityRole="button" accessibilityLabel={musicEnabled ? 'Выключить музыку' : 'Включить музыку'} onPress={toggleMusic} style={[styles.musicButton, !musicEnabled && styles.musicButtonMuted]}><Text style={styles.musicButtonText}>{musicEnabled ? '♫' : '♪'}</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
+            </View>
           </View>
           {connection !== 'connected' && (
             <View style={styles.statusRow}>
@@ -475,7 +504,7 @@ export function WagonPage() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#DCE8F4' }, game: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.soft }, vsm: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }, vsmText: { color: '#FFF', fontSize: 23, fontWeight: '900' }, loadingTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' }, loadingText: { color: colors.muted }, errorText: { color: colors.critical, textAlign: 'center', padding: 16 },
-  hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] },
+  hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] }, musicButton: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, musicButtonMuted: { opacity: 0.55 }, musicButtonText: { color: colors.primary, fontSize: 24, fontWeight: '700' },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   menuAction: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, marginTop: 10 },
   menuActionPrimary: { backgroundColor: colors.action, borderColor: colors.action },

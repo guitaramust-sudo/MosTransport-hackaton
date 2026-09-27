@@ -21,7 +21,8 @@
     "plugins": [
       "expo-asset",
       "expo-font",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-audio"
     ],
     "icon": "./assets/images/icon.png",
     "web": {
