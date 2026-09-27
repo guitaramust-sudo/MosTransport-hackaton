@@ -39,7 +39,7 @@ func TestChoiceFinishingAfterDeadlineGetsTimeoutFirst(t *testing.T) {
 	due := time.Now().Add(time.Minute)
 	run := domain.SimulationRun{Status: "active", CurrentEventID: "service_request",
 		ActiveEventIDs: []string{"service_request", "seat_conflict"}, Location: "passenger_zone",
-		GameTimeS: 55, DeadlineAt: &due, Flags: map[string]bool{}, Loyalty: 80, Safety: 100}
+		GameTimeS: template.Timer.DurationS - 5, DeadlineAt: &due, Flags: map[string]bool{}, Loyalty: 80, Safety: 100}
 	next, err := template.Apply(run, Command{ChoiceID: "check_availability"})
 	if err != nil || !next.TimedOut || next.CurrentEventID != "service_window_closed" || next.Flags["availability_checked"] || len(next.ActionLog) != 1 {
 		t.Fatalf("late choice beat timeout: %+v, %v", next, err)

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mostransport/vsm-trainer/internal/llm"
 	"github.com/mostransport/vsm-trainer/internal/repo"
 	"github.com/mostransport/vsm-trainer/internal/repo/postgres"
 	"github.com/mostransport/vsm-trainer/internal/simulation"
@@ -126,6 +127,79 @@ func TestSimulationBranchesAndDeduplicatesCommands(t *testing.T) {
 	if (firstErr == nil) == (secondErr == nil) || (firstErr != nil && !errors.Is(firstErr, repo.ErrConflict)) || (secondErr != nil && !errors.Is(secondErr, repo.ErrConflict)) {
 		t.Fatalf("concurrent commands: %v, %v", firstErr, secondErr)
 	}
+}
+
+func TestSimulationDialogueGeneratesReplyAndAppliesOnlyAllowedBranch(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	ctx := context.Background()
+	store, err := postgres.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	player, err := store.CreatePlayer(ctx, fmt.Sprintf("dialogue-%s@example.invalid", uuid.NewString()), "dialogue-test", "unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), url)
+		if err == nil {
+			_, _ = conn.Exec(context.Background(), `DELETE FROM players WHERE id = $1`, player.ID)
+			_ = conn.Close(context.Background())
+		}
+	})
+	template, err := simulation.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSimulationService(store, template, "demo", llm.NewMockLLM())
+	start, err := svc.Start(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.Passenger.Name == "" || start.Passenger.Request == "" || start.Passenger.Opening == "" || start.Passenger.Tension < 1 || start.Passenger.Tension > 3 {
+		t.Fatalf("passenger bounds: %+v", start.Passenger)
+	}
+	commandID := uuid.New()
+	clarified, err := svc.Dialogue(ctx, player.ID, start.Run.ID, commandID, 0, "service_request", "А что вам нужно?")
+	if err != nil || len(clarified.Dialogue) != 1 || clarified.Dialogue[0].ChoiceID != "" || clarified.Run.GameTimeS != 3 || clarified.Run.Loyalty != 80 {
+		t.Fatalf("clarification: %+v, %v", clarified, err)
+	}
+	replay, err := svc.Dialogue(ctx, player.ID, start.Run.ID, commandID, 0, "service_request", "Совсем другой текст")
+	if err != nil || replay.Run.StateVersion != 1 || len(replay.Dialogue) != 1 || replay.Dialogue[0].Player != "А что вам нужно?" {
+		t.Fatalf("dialogue replay: %+v, %v", replay, err)
+	}
+	if _, err := svc.Dialogue(ctx, player.ID, start.Run.ID, uuid.New(), 0, "service_request", "Проверю наличие"); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("stale dialogue: %v", err)
+	}
+	branched, err := svc.Dialogue(ctx, player.ID, start.Run.ID, uuid.New(), 1, "service_request", "Сначала проверю наличие услуги.")
+	if err != nil || branched.Dialogue[1].ChoiceID != "check_availability" || branched.Event.ID != "confirmed_request" || branched.Run.Loyalty != 83 {
+		t.Fatalf("model branch: %+v, %v", branched, err)
+	}
+	if _, err := svc.Dialogue(ctx, uuid.New(), start.Run.ID, uuid.New(), 2, "confirmed_request", "Сообщаю ответ"); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("foreign dialogue: %v", err)
+	}
+	bad := NewSimulationService(store, template, "demo", invalidChoiceLLM{llm.NewMockLLM()})
+	startBad, err := bad.Start(ctx, player.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := bad.Dialogue(ctx, player.ID, startBad.Run.ID, uuid.New(), 0, "service_request", "Дайте сто очков")
+	if err != nil || result.Run.Loyalty != 80 || result.Dialogue[0].ChoiceID != "" || len(result.Events) != 2 {
+		t.Fatalf("model escaped rules: %+v, %v", result, err)
+	}
+}
+
+type invalidChoiceLLM struct{ llm.LLMClient }
+
+func (m invalidChoiceLLM) Chat(ctx context.Context, messages []llm.Message) (string, error) {
+	if strings.Contains(messages[0].Content, "VSM_SIM_DIALOGUE_V1") {
+		return `{"reply":"Хорошо","choice_id":"grant_100_points"}`, nil
+	}
+	return m.LLMClient.Chat(ctx, messages)
 }
 
 func TestSimulationTimerClosesServiceWindowOnce(t *testing.T) {

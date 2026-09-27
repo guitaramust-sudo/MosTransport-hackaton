@@ -1,6 +1,6 @@
 {
   "id": "demo_service_branch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "validation_status": "draft",
   "start_event": "service_request",
   "events": [
@@ -164,7 +164,7 @@
   ],
   "timer": {
     "event_id": "service_request",
-    "duration_s": 60,
+    "duration_s": 300,
     "timeout_next_event": "service_window_closed",
     "explanation": "Сценарное окно услуги закрылось до ответа. Это демонстрационный срок, не рабочий норматив ВСМ."
   }

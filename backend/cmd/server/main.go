@@ -70,7 +70,7 @@ func run() error {
 
 	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	situations := service.NewSituationService(store, client, catalog)
-	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace)
+	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace, client)
 	h := &handler.Handlers{
 		Auth:       auth,
 		Profile:    service.NewProfileService(store, cfg.PointsNamespace),
@@ -157,6 +157,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Get("/session/simulations/{id}", h.GetSimulation)
 		r.Get("/session/simulations/{id}/result", h.SimulationResult)
 		r.Post("/session/simulations/{id}/actions", h.SimulationAction)
+		r.Post("/session/simulations/{id}/dialogue", h.SimulationDialogue)
 		r.Get("/session/{id}", h.GetSession)
 		r.Post("/session/{id}/finish", h.FinishSession)
 		r.Get("/situation/{id}", h.GetSituation)

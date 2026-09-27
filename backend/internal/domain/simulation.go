@@ -27,12 +27,33 @@ type SimulationRun struct {
 	Passed           bool                 `json:"passed"`
 	SeedVariant      string               `json:"seed_variant"`
 	PointsNamespace  string               `json:"points_namespace"`
+	Passenger        SimulationPassenger  `json:"passenger"`
+	Dialogue         []SimulationDialogue `json:"dialogue"`
 	ActionLog        []SimulationLogEntry `json:"action_log"`
 	Flags            map[string]bool      `json:"flags"`
 	Loyalty          int                  `json:"loyalty"`
 	Safety           int                  `json:"safety"`
 	Path             []string             `json:"path"`
 	TemplateSnapshot json.RawMessage      `json:"template_snapshot"`
+}
+
+// SimulationPassenger contains bounded, randomly selected narrative details.
+// These never change scenario rules or professional procedure.
+type SimulationPassenger struct {
+	Name        string `json:"name"`
+	Temperament string `json:"temperament"`
+	Tension     int    `json:"tension"`
+	Request     string `json:"request"`
+	Opening     string `json:"opening"`
+}
+
+type SimulationDialogue struct {
+	CommandID   uuid.UUID `json:"command_id"`
+	EventID     string    `json:"event_id"`
+	Player      string    `json:"player"`
+	Passenger   string    `json:"passenger"`
+	ChoiceID    string    `json:"choice_id,omitempty"`
+	AtGameTimeS int       `json:"at_game_time_s"`
 }
 
 type SimulationLogEntry struct {

@@ -75,6 +75,24 @@ func (s *Store) GetSimulationRun(ctx context.Context, runID, playerID uuid.UUID)
 	return run, err
 }
 
+func (s *Store) GetSimulationCommandResult(ctx context.Context, runID, playerID, commandID uuid.UUID) (*domain.SimulationRun, error) {
+	var raw []byte
+	err := s.pool.QueryRow(ctx, `SELECT c.result_state FROM simulation_commands c
+		JOIN simulation_runs r ON r.id = c.run_id
+		WHERE c.run_id = $1 AND r.player_id = $2 AND c.command_id = $3`, runID, playerID, commandID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var run domain.SimulationRun
+	if err := json.Unmarshal(raw, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
 func (s *Store) ApplySimulationCommand(ctx context.Context, runID, playerID, commandID uuid.UUID, expectedVersion int, apply func(domain.SimulationRun) (domain.SimulationRun, error)) (domain.SimulationRun, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

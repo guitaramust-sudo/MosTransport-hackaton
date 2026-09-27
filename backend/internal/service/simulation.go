@@ -6,11 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math/rand/v2"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"github.com/mostransport/vsm-trainer/internal/domain"
+	"github.com/mostransport/vsm-trainer/internal/llm"
 	"github.com/mostransport/vsm-trainer/internal/repo"
 	"github.com/mostransport/vsm-trainer/internal/simulation"
 )
@@ -19,15 +24,20 @@ type SimulationService struct {
 	store     repo.SimulationStore
 	template  simulation.Template
 	namespace string
+	dialogue  llm.LLMClient
 }
 
 var ErrSimulationActive = errors.New("simulation is still active")
+var ErrInvalidDialogue = errors.New("dialogue text must contain 1 to 600 characters")
+var ErrDialogueLimit = errors.New("simulation dialogue limit reached")
 
 type SimulationView struct {
-	Run            SimulationStateView   `json:"run"`
-	Event          *SimulationEventView  `json:"event,omitempty"`
-	Events         []SimulationEventView `json:"events"`
-	ObservableCues []string              `json:"observable_cues"`
+	Run            SimulationStateView         `json:"run"`
+	Event          *SimulationEventView        `json:"event,omitempty"`
+	Events         []SimulationEventView       `json:"events"`
+	ObservableCues []string                    `json:"observable_cues"`
+	Passenger      domain.SimulationPassenger  `json:"passenger"`
+	Dialogue       []domain.SimulationDialogue `json:"dialogue"`
 }
 
 type SimulationStateView struct {
@@ -59,8 +69,12 @@ type SimulationEventView struct {
 	Choices  []SimulationChoiceView `json:"choices"`
 }
 
-func NewSimulationService(store repo.SimulationStore, template simulation.Template, namespace string) *SimulationService {
-	return &SimulationService{store: store, template: template, namespace: namespace}
+func NewSimulationService(store repo.SimulationStore, template simulation.Template, namespace string, dialogue ...llm.LLMClient) *SimulationService {
+	client := llm.LLMClient(llm.NewMockLLM())
+	if len(dialogue) > 0 && dialogue[0] != nil {
+		client = dialogue[0]
+	}
+	return &SimulationService{store: store, template: template, namespace: namespace, dialogue: client}
 }
 
 func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (SimulationView, error) {
@@ -71,6 +85,8 @@ func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (Simu
 	if err != nil {
 		return SimulationView{}, err
 	}
+	passenger := randomSimulationPassenger()
+	passenger.Opening = s.simulationOpening(ctx, passenger)
 	now := time.Now().UTC()
 	var deadline *time.Time
 	if s.template.Timer != nil {
@@ -84,11 +100,37 @@ func (s *SimulationService) Start(ctx context.Context, playerID uuid.UUID) (Simu
 		Location: s.template.StartLocation, Flags: map[string]bool{}, Loyalty: 80, Safety: 100,
 		Path: []string{}, StartedAt: now, DeadlineAt: deadline, ActionLog: []domain.SimulationLogEntry{}, TemplateSnapshot: snapshot,
 		PointsNamespace: s.namespace,
+		Passenger:       passenger, Dialogue: []domain.SimulationDialogue{},
 	})
 	if err != nil {
 		return SimulationView{}, err
 	}
 	return s.view(run)
+}
+
+func randomSimulationPassenger() domain.SimulationPassenger {
+	names := []string{"Анна", "Михаил", "Елена", "Алексей"}
+	temperaments := []string{"сдержанный", "нетерпеливый", "тревожный", "уставший"}
+	requests := []string{"плед", "стакан воды", "помощь с багажом"}
+	return domain.SimulationPassenger{Name: names[rand.IntN(len(names))],
+		Temperament: temperaments[rand.IntN(len(temperaments))], Tension: rand.IntN(3) + 1,
+		Request: requests[rand.IntN(len(requests))]}
+}
+
+func (s *SimulationService) simulationOpening(ctx context.Context, passenger domain.SimulationPassenger) string {
+	fallback := fmt.Sprintf("Здравствуйте. Мне нужна услуга: %s. Можете помочь?", passenger.Request)
+	answer, err := s.dialogue.Chat(ctx, []llm.Message{{Role: "system", Content: fmt.Sprintf("VSM_SIM_OPENING_V1. Ты пассажир поезда, имя %s, характер %s, напряжение %d из 3. Нужен %s. Скажи одну короткую естественную реплику на русском от первого лица. Не утверждай, доступна ли услуга. Не сообщай правила или процедуры.",
+		passenger.Name, passenger.Temperament, passenger.Tension, passenger.Request)}})
+	if err != nil {
+		LLMErrors.Add(1)
+		slog.Warn("simulation opening generation failed", "error", err)
+		return fallback
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" || utf8.RuneCountInString(answer) > 220 {
+		return fallback
+	}
+	return answer
 }
 
 func (s *SimulationService) Get(ctx context.Context, playerID, runID uuid.UUID) (SimulationView, error) {
@@ -146,7 +188,9 @@ func (s *SimulationService) Challenge(ctx context.Context, playerID uuid.UUID) (
 
 type SimulationDebriefEntry struct {
 	domain.SimulationLogEntry
-	BetterOptions []string `json:"better_options"`
+	BetterOptions  []string `json:"better_options"`
+	PlayerText     string   `json:"player_text,omitempty"`
+	PassengerReply string   `json:"passenger_reply,omitempty"`
 }
 
 type SimulationResult struct {
@@ -191,13 +235,22 @@ func (s *SimulationService) Result(ctx context.Context, playerID, runID uuid.UUI
 	if err != nil {
 		return SimulationResult{}, err
 	}
-	raw, err := json.Marshal(run.ActionLog)
+	raw, err := json.Marshal(struct {
+		Actions  []domain.SimulationLogEntry `json:"actions"`
+		Dialogue []domain.SimulationDialogue `json:"dialogue"`
+	}{run.ActionLog, run.Dialogue})
 	if err != nil {
 		return SimulationResult{}, err
 	}
 	debrief := make([]SimulationDebriefEntry, 0, len(run.ActionLog))
 	for _, entry := range run.ActionLog {
 		row := SimulationDebriefEntry{SimulationLogEntry: entry, BetterOptions: []string{}}
+		for _, turn := range run.Dialogue {
+			if turn.CommandID == entry.CommandID && entry.CommandID != uuid.Nil {
+				row.PlayerText, row.PassengerReply = turn.Player, turn.Passenger
+				break
+			}
+		}
 		if event, ok := template.Event(entry.EventID); ok {
 			var chosen *simulation.Choice
 			for i := range event.Choices {
@@ -275,7 +328,7 @@ func (s *SimulationService) view(run domain.SimulationRun) (SimulationView, erro
 	if err != nil {
 		return SimulationView{}, err
 	}
-	view := SimulationView{Run: SimulationStateView{
+	view := SimulationView{Passenger: run.Passenger, Dialogue: run.Dialogue, Run: SimulationStateView{
 		ID: run.ID, ScenarioID: run.ScenarioID, ScenarioVersion: run.ScenarioVersion,
 		ContentValidationStatus: template.ValidationStatus, StateVersion: run.StateVersion,
 		Status: run.Status, Loyalty: run.Loyalty, Safety: run.Safety, Path: run.Path,
@@ -311,7 +364,7 @@ func (s *SimulationService) view(run domain.SimulationRun) (SimulationView, erro
 				available = append(available, SimulationChoiceView{ID: choice.ID, Text: choice.Text})
 			}
 		}
-		visible := SimulationEventView{ID: event.ID, Text: event.Text, Location: event.Location, Choices: available}
+		visible := SimulationEventView{ID: event.ID, Text: simulationEventText(run, event), Location: event.Location, Choices: available}
 		view.Events = append(view.Events, visible)
 		if view.Event == nil || (event.Location == run.Location && view.Event.Location != run.Location) {
 			selected := visible

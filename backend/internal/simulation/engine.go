@@ -213,6 +213,8 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 			}
 		case "inspect":
 			cost = 5
+		case "talk":
+			cost = 3
 		case "", "choose":
 			cost = 6
 		}
@@ -228,6 +230,28 @@ func (t Template) Apply(run domain.SimulationRun, command Command) (domain.Simul
 		}
 	}
 	switch command.ActionID {
+	case "talk":
+		eventID := command.EventID
+		if eventID == "" {
+			eventID = run.CurrentEventID
+		}
+		active := false
+		for _, id := range run.ActiveEventIDs {
+			if id == eventID {
+				active = true
+				break
+			}
+		}
+		event, ok := t.Event(eventID)
+		if !active || !ok || event.Location != run.Location || (event.Hidden && !run.ObservedEvents[eventID]) {
+			return run, ErrInvalidChoice
+		}
+		run.GameTimeS += 3
+		run.ActionLog = append(run.ActionLog, domain.SimulationLogEntry{CommandID: command.CommandID,
+			EventID: eventID, ActionID: "talk", EffectID: "clarification", Explanation: "Игрок уточнил ситуацию; решение пока не принято.",
+			AtGameTimeS: run.GameTimeS, LoyaltyBefore: run.Loyalty, LoyaltyAfter: run.Loyalty,
+			SafetyBefore: run.Safety, SafetyAfter: run.Safety})
+		return run, nil
 	case "move_to":
 		for _, edge := range t.Edges {
 			if (edge.From == run.Location && edge.To == command.Target) || (edge.To == run.Location && edge.From == command.Target) {

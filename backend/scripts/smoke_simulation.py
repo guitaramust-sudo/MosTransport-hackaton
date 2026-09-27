@@ -41,8 +41,9 @@ def register():
     return response["player"]["id"], response["tokens"]["access_token"]
 
 
-def run(token):
+def run(token, use_dialogue=False):
     view = request("POST", "/api/session/simulations", token, {}, 201)
+    assert view["passenger"]["opening"] and 1 <= view["passenger"]["tension"] <= 3
     run_id = view["run"]["id"]
     variant = view["run"]["seed_variant"]
     steps = [
@@ -54,17 +55,37 @@ def run(token):
         {"event_id": "wet_floor", "choice_id": "report_spill"},
     ]
     first_command = None
+    first_path = None
     for index, step in enumerate(steps):
+        dialogue_text = {
+            0: "Сначала проверю наличие услуги.",
+            1: "Сообщаю, что принесу услугу.",
+            2: "Проверю билеты обоих пассажиров.",
+            5: "Предупрежу пассажиров и организую устранение.",
+        }
+        is_dialogue = use_dialogue and index in dialogue_text
         command = {"command_id": str(uuid.uuid4()),
-                   "expected_state_version": view["run"]["state_version"], **step}
-        view = request("POST", f"/api/session/simulations/{run_id}/actions", token, command)
+                   "expected_state_version": view["run"]["state_version"]}
+        if is_dialogue:
+            command.update(event_id=step["event_id"], text=dialogue_text[index])
+        else:
+            command.update(step)
+        path = f"/api/session/simulations/{run_id}/" + ("dialogue" if is_dialogue else "actions")
+        view = request("POST", path, token, command)
         if index == 0:
             first_command = command
+            first_path = path
     assert view["run"]["status"] == "finished"
+    if use_dialogue:
+        assert len(view["dialogue"]) == 4
+        assert view["dialogue"][0]["choice_id"] == "check_availability"
     result = request("GET", f"/api/session/simulations/{run_id}/result", token)
     assert result["session_pass"] and len(result["debrief"]) == 6
+    if use_dialogue:
+        assert result["debrief"][0]["player_text"] == dialogue_text[0]
+        assert result["debrief"][0]["passenger_reply"]
     assert result["leaderboard_points_delta"] in (10, 20)
-    assert request("POST", f"/api/session/simulations/{run_id}/actions", token, first_command)["run"]["state_version"] == 1
+    assert request("POST", first_path, token, first_command)["run"]["state_version"] == 1
     assert request("GET", f"/api/session/simulations/{run_id}/result", token)["leaderboard_points_delta"] == result["leaderboard_points_delta"]
     return run_id, variant, result
 
@@ -74,7 +95,7 @@ def main():
         assert response.status == 200
     player_id, token = register()
     _, other_token = register()
-    first_id, first_variant, first = run(token)
+    first_id, first_variant, first = run(token, use_dialogue=True)
     request("GET", f"/api/session/simulations/{first_id}", other_token, expected=404)
     _, second_variant, second = run(token)
     assert {first_variant, second_variant} == {"A", "B"}

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -21,10 +22,12 @@ func (m *MockLLM) Chat(ctx context.Context, messages []Message) (string, error) 
 
 	last := ""
 	language := "ru"
+	system := ""
 	for _, message := range messages {
 		if message.Role != "system" {
 			continue
 		}
+		system = message.Content
 		for _, candidate := range []string{"en", "zh", "de"} {
 			if strings.Contains(message.Content, "Язык: "+candidate+".") {
 				language = candidate
@@ -36,6 +39,61 @@ func (m *MockLLM) Chat(ctx context.Context, messages []Message) (string, error) 
 			last = strings.ToLower(messages[i].Content)
 			break
 		}
+	}
+	if strings.Contains(system, "VSM_SIM_OPENING_V1") {
+		request := "услуга"
+		for _, item := range []string{"плед", "стакан воды", "помощь с багажом"} {
+			if strings.Contains(system, item) {
+				request = item
+				break
+			}
+		}
+		return "Здравствуйте. Мне нужен " + request + ". Поможете?", nil
+	}
+	if strings.Contains(system, "VSM_SIM_DIALOGUE_V1") {
+		choice := ""
+		match := func(id string, words ...string) bool {
+			if !strings.Contains(system, id+":") {
+				return false
+			}
+			for _, word := range words {
+				if strings.Contains(last, word) {
+					return true
+				}
+			}
+			return false
+		}
+		switch {
+		case match("check_availability", "провер", "уточню наличие"):
+			choice = "check_availability"
+		case match("promise_immediately", "обещаю", "принесу", "точно будет"):
+			choice = "promise_immediately"
+		case match("explain_next_step", "сообщаю", "принесу", "следующ"):
+			choice = "explain_next_step"
+		case match("correct_promise", "извин", "альтернатив"):
+			choice = "correct_promise"
+		case match("ignore_followup", "не буду", "не моя проблема"):
+			choice = "ignore_followup"
+		case match("check_tickets", "билет", "провер"):
+			choice = "check_tickets"
+		case match("dismiss_dispute", "разбирайтесь", "не моя проблема"):
+			choice = "dismiss_dispute"
+		case match("report_spill", "предупреж", "устран", "уберу"):
+			choice = "report_spill"
+		case match("walk_past", "пройду мимо", "ничего делать"):
+			choice = "walk_past"
+		case match("explain_closed_window", "объясню", "предложу"):
+			choice = "explain_closed_window"
+		}
+		reply := "Пожалуйста, расскажите, что вы собираетесь сделать."
+		if choice != "" {
+			reply = "Спасибо, я понял ваш следующий шаг."
+		}
+		encoded, _ := json.Marshal(struct {
+			Reply    string `json:"reply"`
+			ChoiceID string `json:"choice_id"`
+		}{reply, choice})
+		return string(encoded), nil
 	}
 	// Keep the offline demo usable for passengers who do not speak Russian.
 	switch language {

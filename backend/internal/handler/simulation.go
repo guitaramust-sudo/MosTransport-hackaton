@@ -95,6 +95,46 @@ type simulationActionRequest struct {
 	ChoiceID             string    `json:"choice_id"`
 }
 
+type simulationDialogueRequest struct {
+	CommandID            uuid.UUID `json:"command_id"`
+	ExpectedStateVersion int       `json:"expected_state_version"`
+	EventID              string    `json:"event_id"`
+	Text                 string    `json:"text"`
+}
+
+func (h *Handlers) SimulationDialogue(w http.ResponseWriter, r *http.Request) {
+	playerID, _ := middleware.PlayerIDFromContext(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid simulation id")
+		return
+	}
+	var req simulationDialogueRequest
+	if err := decodeJSON(r, &req); err != nil || req.CommandID == uuid.Nil || req.ExpectedStateVersion < 0 {
+		writeError(w, http.StatusBadRequest, "command_id and expected_state_version required")
+		return
+	}
+	view, err := h.Simulation.Dialogue(r.Context(), playerID, id, req.CommandID, req.ExpectedStateVersion, req.EventID, req.Text)
+	switch {
+	case errors.Is(err, repo.ErrNotFound):
+		writeError(w, http.StatusNotFound, "simulation not found")
+	case errors.Is(err, repo.ErrConflict):
+		writeError(w, http.StatusConflict, "state version changed")
+	case errors.Is(err, service.ErrDialogueLimit):
+		writeError(w, http.StatusConflict, "dialogue limit reached")
+	case errors.Is(err, service.ErrInvalidDialogue):
+		writeError(w, http.StatusBadRequest, "text must contain 1 to 600 characters")
+	case errors.Is(err, simulation.ErrInvalidChoice):
+		writeError(w, http.StatusBadRequest, "event unavailable")
+	case errors.Is(err, simulation.ErrFinished):
+		writeError(w, http.StatusConflict, "simulation already finished")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal error")
+	default:
+		writeJSON(w, http.StatusOK, view)
+	}
+}
+
 func (h *Handlers) SimulationAction(w http.ResponseWriter, r *http.Request) {
 	playerID, _ := middleware.PlayerIDFromContext(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
