@@ -11,9 +11,9 @@ import (
 // DEBRIEF->COMPLETED lifecycle described in content.Lesson's doc comment:
 // TheoryPass gates starting practice, PracticeCheckPass is set once every
 // practice question has been answered correctly at least once,
-// PracticePass reflects the practice attempt's outcome (visit/inspect
-// coverage or scenario result, depending on the lesson's CompletionRule),
-// and CompletedAt is set exactly once, on the call that actually awards
+// PracticePass reflects the latest attempt's outcome (visit/inspect coverage
+// or a successful conversation), PracticePassCount counts distinct successful
+// sessions, and CompletedAt is set exactly once on the call that awards
 // lesson completion (see LearningService.FinalizePractice).
 type LessonProgress struct {
 	PlayerID          uuid.UUID  `json:"player_id"`
@@ -21,6 +21,7 @@ type LessonProgress struct {
 	TheoryPass        bool       `json:"theory_pass"`
 	PracticeSessionID *uuid.UUID `json:"practice_session_id,omitempty"`
 	PracticePass      bool       `json:"practice_pass"`
+	PracticePassCount int        `json:"practice_pass_count"`
 	PracticeCheckPass bool       `json:"practice_check_pass"`
 	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 	ContentVersion    string     `json:"content_version"`

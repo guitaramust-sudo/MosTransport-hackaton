@@ -133,13 +133,14 @@ function PracticeIntro({ lesson, onStart, busy, error }: { lesson: LessonDetail;
     <>
       <Card>
         <View style={styles.practiceIcon}><Icon name="train" size={28} color={colors.action} /></View>
-        <Text style={styles.practiceTitle}>Практика в вагоне</Text>
+        <Text style={styles.practiceTitle}>Практика в вагоне · {Math.min(lesson.progress.practice_pass_count ?? 0, 2)}/2</Text>
+        <Text style={styles.practiceText}>Для зачёта урока нужно успешно пройти практику дважды в разных сменах.</Text>
         {lesson.completion_rule === 'visit_inspect' ? <>
           <Text style={styles.practiceText}>Пройдите по вагону. Отметка появится, когда вы подойдёте к точке, а объект засчитается после «Осмотреть».</Text>
           {anchors.length > 0 && <Text style={styles.practiceGoal}>Посетить: {anchors.join(', ')}</Text>}
           {objects.length > 0 && <Text style={styles.practiceGoal}>Осмотреть: {objects.join(', ')}</Text>}
         </> : (
-          <Text style={styles.practiceText}>В вагоне один пассажир. Заметьте его, подойдите и выясните просьбу в разговоре — не угадывайте её заранее.</Text>
+          <Text style={styles.practiceText}>Найдите пассажира с обращением, подойдите и выясните просьбу в разговоре — не угадывайте её заранее.</Text>
         )}
         <View style={styles.metaRow}><Icon name="clock" size={16} color={colors.secondary} /><Text style={styles.metaText}>≈ {lesson.estimated_min || 5} мин · ориентировочно</Text></View>
       </Card>
@@ -159,6 +160,8 @@ function Result({ lesson, result, onRetryPractice, onRestart, onNext }: {
   const myLearning = useQuery({ queryKey: ['my-learning'], queryFn: api.myLearning })
   const badge = lessonBadge(lesson.lesson_id)
   const completed = Boolean(result?.completed || lesson.progress.completed_at)
+  const passCount = result?.practice_pass_count ?? lesson.progress.practice_pass_count ?? 0
+  const passRequired = result?.practice_pass_required ?? 2
   const found = [...(result?.found_anchors ?? []), ...(result?.found_objects ?? [])]
   const missing = [...(result?.missing_anchors ?? []), ...(result?.missing_objects ?? [])]
   const label = (id: string) => wagonAnchorLabels[id as WagonAnchor] ?? wagonObjectLabels[id] ?? id
@@ -167,7 +170,8 @@ function Result({ lesson, result, onRetryPractice, onRestart, onNext }: {
     <>
       <Card style={styles.resultCard}>
         {badge && <Badge id={badge} size={112} locked={!completed} />}
-        <Text style={styles.resultTitle}>{completed ? 'Урок пройден' : 'Цель пока не выполнена'}</Text>
+        <Text style={styles.resultTitle}>{completed ? 'Урок пройден' : passCount > 0 && result?.scenario_pass !== false && result?.missing?.every((item) => item === 'practice_runs') ? `Практика ${passCount}/${passRequired} зачтена` : 'Цель пока не выполнена'}</Text>
+        {!completed && <Text style={styles.resultNote}>Успешных прохождений практики: {passCount} из {passRequired}.</Text>}
         {badge && <Text style={styles.resultBadge}>Бейдж «{badgeTitles[badge]}»{completed ? '' : ' откроется после зачёта'}</Text>}
         {result?.award_granted && (
           <View style={styles.awards}>
@@ -193,7 +197,7 @@ function Result({ lesson, result, onRetryPractice, onRestart, onNext }: {
           {result.scenario_pass !== undefined && (
             <View style={styles.debriefRow}>
               <Icon name={result.scenario_pass ? 'check' : 'close'} size={18} color={result.scenario_pass ? colors.successInk : colors.errorInk} strokeWidth={2.4} />
-              <Text style={styles.debriefItem}>{result.scenario_pass ? 'Обращение пассажира закрыто без ошибок' : 'Обращение пассажира закрыто с ошибкой'}</Text>
+              <Text style={styles.debriefItem}>{result.scenario_pass ? 'Обращение закрыто после разговора с пассажиром' : 'Нужно поговорить с пассажиром и успешно закрыть обращение'}</Text>
             </View>
           )}
         </Card>

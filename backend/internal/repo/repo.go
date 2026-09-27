@@ -115,6 +115,7 @@ type Store interface {
 	UpsertLessonProgress(ctx context.Context, p domain.LessonProgress) error                                   // full replace, PK on (player_id, lesson_id)
 	RecordLessonAnswer(ctx context.Context, playerID uuid.UUID, lessonID, questionID, optionID string, correct bool) error
 	HasCorrectLessonAnswer(ctx context.Context, playerID uuid.UUID, lessonID, questionID string) (bool, error)                 // true iff any past answer for this question was correct
+	RecordPassedLessonPractice(ctx context.Context, playerID uuid.UUID, lessonID string, sessionID uuid.UUID) (int, error)     // idempotent per session; returns total passed runs
 	AwardLessonCompletion(ctx context.Context, playerID uuid.UUID, lessonID string, xpDelta int, badgeID string) (bool, error) // atomic INSERT ... ON CONFLICT DO NOTHING; returns whether it actually inserted (false = already awarded)
 
 	// Prize credits

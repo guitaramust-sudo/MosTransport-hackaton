@@ -254,8 +254,8 @@ export function WagonPage() {
   // Alert.alert is a no-op on web, so the pause menu is an in-game sheet.
   const openMenu = () => setMenuOpen(true)
 
-  // Lesson practice ends by itself: when every visit/inspect goal is done, or,
-  // for a conversation lesson, when the passenger's request has been closed.
+  // Lesson practice ends by itself when visit/inspect goals are reached or
+  // the conversation situation closes. The server evaluates its outcome.
   const sawSituation = useRef(false)
   const lessonFinishTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -272,7 +272,7 @@ export function WagonPage() {
     }
     if (!done) return
     autoFinishStarted.current = true
-    showToast('Все задачи выполнены')
+    showToast(anchors.length + objects.length > 0 ? 'Все задачи выполнены' : 'Обращение завершено. Проверяем результат')
     // Kept in a ref: snapshot updates re-run this effect every second and must not cancel it.
     lessonFinishTimer.current = setTimeout(() => void finishShift(), 1200)
   }, [isLessonPractice, snapshot, lesson.data, selectedId])

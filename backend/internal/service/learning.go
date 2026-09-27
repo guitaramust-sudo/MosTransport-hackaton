@@ -28,6 +28,8 @@ var (
 // XP" rule.
 const lessonCompletionXP = 20
 
+const lessonPracticePassesRequired = 2
+
 // prizeCreditPerLesson is the flat prize-credit award for a lesson's first
 // successful completion, per the separate, minimal prize-credit ledger's
 // "+10 per B01/B02 first completion" rule. This is entirely independent of
@@ -428,24 +430,26 @@ func (s *LearningService) StartPractice(ctx context.Context, playerID uuid.UUID,
 
 // FinalizeResult is the outcome of finalizing a lesson's practice attempt.
 type FinalizeResult struct {
-	Completed      bool     `json:"completed"`
-	Missing        []string `json:"missing,omitempty"` // subset of "theory_pass"|"practice_pass"|"practice_check_pass" still false
-	AwardGranted   bool     `json:"award_granted"`     // false when this lesson was already awarded on an earlier call (idempotent repeat)
-	XPAwarded      int      `json:"xp_awarded,omitempty"`
-	BadgeID        string   `json:"badge_id,omitempty"`
-	Debrief        string   `json:"debrief"`
-	FoundAnchors   []string `json:"found_anchors,omitempty"`
-	MissingAnchors []string `json:"missing_anchors,omitempty"`
-	FoundObjects   []string `json:"found_objects,omitempty"`
-	MissingObjects []string `json:"missing_objects,omitempty"`
-	ScenarioPass   *bool    `json:"scenario_pass,omitempty"`
+	Completed            bool     `json:"completed"`
+	Missing              []string `json:"missing,omitempty"` // unmet lesson gates, including "practice_runs"
+	PracticePassCount    int      `json:"practice_pass_count"`
+	PracticePassRequired int      `json:"practice_pass_required"`
+	AwardGranted         bool     `json:"award_granted"` // false when this lesson was already awarded on an earlier call (idempotent repeat)
+	XPAwarded            int      `json:"xp_awarded,omitempty"`
+	BadgeID              string   `json:"badge_id,omitempty"`
+	Debrief              string   `json:"debrief"`
+	FoundAnchors         []string `json:"found_anchors,omitempty"`
+	MissingAnchors       []string `json:"missing_anchors,omitempty"`
+	FoundObjects         []string `json:"found_objects,omitempty"`
+	MissingObjects       []string `json:"missing_objects,omitempty"`
+	ScenarioPass         *bool    `json:"scenario_pass,omitempty"`
 }
 
 // FinalizePractice checks lessonID's practice attempt against its
 // CompletionRule, persists the result, and -- only once all three of
 // TheoryPass/PracticePass/PracticeCheckPass are true -- awards lesson
-// completion exactly once (idempotent: repeat calls after the first award
-// return Completed:true with AwardGranted:false, never double-applying XP).
+// completion after two distinct successful practice sessions (idempotent:
+// repeat calls after the first award never double-apply XP).
 func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UUID, lessonID string) (FinalizeResult, error) {
 	lesson, ok := lessonByID(s.curriculum, lessonID)
 	if !ok {
@@ -466,7 +470,7 @@ func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UU
 		return FinalizeResult{}, err
 	}
 
-	result := FinalizeResult{Debrief: lesson.DebriefIntro}
+	result := FinalizeResult{Debrief: lesson.DebriefIntro, PracticePassCount: progress.PracticePassCount, PracticePassRequired: lessonPracticePassesRequired}
 	var practicePass bool
 	switch lesson.CompletionRule {
 	case "visit_inspect":
@@ -480,7 +484,7 @@ func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UU
 				inspected[o] = true
 			}
 		}
-		allFound := true
+		allFound := sess.Status == domain.SessionStatusFinished && len(lesson.RequiredAnchorIDs)+len(lesson.RequiredObjectIDs) > 0
 		for _, a := range lesson.RequiredAnchorIDs {
 			if visited[a] {
 				result.FoundAnchors = append(result.FoundAnchors, a)
@@ -499,22 +503,34 @@ func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UU
 		}
 		practicePass = allFound
 	case "scenario_result":
-		// Pass iff no situation in the session resolved with outcome "fail"
-		// -- the exact same rule as WagonService.AdvanceIfPassed and
-		// AdminService.wagonProgression use for the standard wagon-level
-		// gate, for consistency. A fuller causal debrief (what was an
-		// observed signal vs. what the passenger actually said vs. what was
-		// only assumed) could read this session's message/scoring log
-		// later; that's out of scope for this task.
+		// A conversation lesson needs its authored situation to have been
+		// completed successfully and at least one player message. An empty,
+		// active or timed-out session must not count as a conversation.
 		situations, err := s.store.ListSituationsBySession(ctx, sess.ID)
 		if err != nil {
 			return FinalizeResult{}, err
 		}
-		pass := true
+		pass := sess.Status == domain.SessionStatusFinished && len(lesson.MandatoryEventIDs) > 0 && len(situations) > 0
+		seen := map[string]bool{}
 		for _, sit := range situations {
-			if sit.Outcome != nil && *sit.Outcome == "fail" {
+			if sit.SituationDefID != nil {
+				seen[*sit.SituationDefID] = true
+			}
+			if sit.Status != domain.SituationStatusClosed || sit.Outcome == nil || (*sit.Outcome != "success" && *sit.Outcome != "resolved_positive") {
 				pass = false
-				break
+				continue
+			}
+			messages, err := s.store.CountPlayerMessages(ctx, sit.ID)
+			if err != nil {
+				return FinalizeResult{}, err
+			}
+			if messages == 0 {
+				pass = false
+			}
+		}
+		for _, id := range lesson.MandatoryEventIDs {
+			if !seen[id] {
+				pass = false
 			}
 		}
 		practicePass = pass
@@ -524,11 +540,19 @@ func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UU
 	}
 
 	progress.PracticePass = practicePass
+	if practicePass {
+		count, err := s.store.RecordPassedLessonPractice(ctx, playerID, lessonID, sess.ID)
+		if err != nil {
+			return FinalizeResult{}, err
+		}
+		progress.PracticePassCount = count
+		result.PracticePassCount = count
+	}
 	if err := s.store.UpsertLessonProgress(ctx, progress); err != nil {
 		return FinalizeResult{}, err
 	}
 
-	if !(progress.TheoryPass && progress.PracticePass && progress.PracticeCheckPass) {
+	if !(progress.TheoryPass && progress.PracticePass && progress.PracticeCheckPass && progress.PracticePassCount >= lessonPracticePassesRequired) {
 		if !progress.TheoryPass {
 			result.Missing = append(result.Missing, "theory_pass")
 		}
@@ -537,6 +561,9 @@ func (s *LearningService) FinalizePractice(ctx context.Context, playerID uuid.UU
 		}
 		if !progress.PracticeCheckPass {
 			result.Missing = append(result.Missing, "practice_check_pass")
+		}
+		if progress.PracticePassCount < lessonPracticePassesRequired {
+			result.Missing = append(result.Missing, "practice_runs")
 		}
 		result.Completed = false
 		return result, nil

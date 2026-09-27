@@ -15,18 +15,33 @@ import (
 const lessonProgressColumns = `player_id, lesson_id, theory_pass, practice_session_id, practice_pass, practice_check_pass, completed_at, content_version`
 
 func scanLessonProgress(p *domain.LessonProgress) []any {
-	return []any{&p.PlayerID, &p.LessonID, &p.TheoryPass, &p.PracticeSessionID, &p.PracticePass, &p.PracticeCheckPass, &p.CompletedAt, &p.ContentVersion}
+	return []any{&p.PlayerID, &p.LessonID, &p.TheoryPass, &p.PracticeSessionID, &p.PracticePass, &p.PracticeCheckPass, &p.CompletedAt, &p.ContentVersion, &p.PracticePassCount}
 }
 
 func (s *Store) GetLessonProgress(ctx context.Context, playerID uuid.UUID, lessonID string) (domain.LessonProgress, error) {
 	var p domain.LessonProgress
 	err := s.pool.QueryRow(ctx,
-		`SELECT `+lessonProgressColumns+` FROM lesson_progress WHERE player_id = $1 AND lesson_id = $2`, playerID, lessonID,
+		`SELECT `+lessonProgressColumns+`,
+		 (SELECT COUNT(*) FROM lesson_practice_passes WHERE player_id = $1 AND lesson_id = $2)
+		 FROM lesson_progress WHERE player_id = $1 AND lesson_id = $2`, playerID, lessonID,
 	).Scan(scanLessonProgress(&p)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, repo.ErrNotFound
 	}
 	return p, err
+}
+
+func (s *Store) RecordPassedLessonPractice(ctx context.Context, playerID uuid.UUID, lessonID string, sessionID uuid.UUID) (int, error) {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO lesson_practice_passes (player_id, lesson_id, session_id) VALUES ($1, $2, $3)
+		 ON CONFLICT DO NOTHING`, playerID, lessonID, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM lesson_practice_passes WHERE player_id = $1 AND lesson_id = $2`, playerID, lessonID).Scan(&count)
+	return count, err
 }
 
 // UpsertLessonProgress fully replaces the (player_id, lesson_id) row.

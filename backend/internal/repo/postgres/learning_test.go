@@ -3,7 +3,42 @@ package postgres
 import (
 	"context"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/mostransport/vsm-trainer/internal/domain"
 )
+
+func TestPassedLessonPracticeCountsDistinctSessions(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = store.pool.Exec(context.Background(), `DELETE FROM lesson_progress WHERE player_id = $1`, playerID)
+	})
+	first, err := store.CreateSession(ctx, playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateSession(ctx, playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLessonProgress(ctx, domain.LessonProgress{PlayerID: playerID, LessonID: "L1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, attempt := range []struct {
+		id   uuid.UUID
+		want int
+	}{{first.ID, 1}, {first.ID, 1}, {second.ID, 2}} {
+		count, err := store.RecordPassedLessonPractice(ctx, playerID, "L1", attempt.id)
+		if err != nil || count != attempt.want {
+			t.Fatalf("session %s: count %d, want %d: %v", attempt.id, count, attempt.want, err)
+		}
+	}
+	progress, err := store.GetLessonProgress(ctx, playerID, "L1")
+	if err != nil || progress.PracticePassCount != 2 {
+		t.Fatalf("persisted practice count: %+v, %v", progress, err)
+	}
+}
 
 // TestAwardLessonCompletionIsAtomicIdempotent verifies AwardLessonCompletion
 // really is atomic-idempotent: a second call with the same (playerID,

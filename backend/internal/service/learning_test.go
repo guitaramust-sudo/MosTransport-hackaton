@@ -27,7 +27,10 @@ type fakeLearningStore struct {
 	mu           sync.Mutex
 	players      map[uuid.UUID]domain.Player
 	sessions     map[uuid.UUID]domain.Session
+	situations   map[uuid.UUID][]domain.Situation
+	messageCount map[uuid.UUID]int
 	progress     map[string]domain.LessonProgress
+	passedRuns   map[string]map[uuid.UUID]bool
 	correct      map[string]bool
 	awarded      map[string]bool
 	prizeEntries map[string]domain.PrizeCreditEntry
@@ -38,7 +41,10 @@ func newFakeLearningStore() *fakeLearningStore {
 	return &fakeLearningStore{
 		players:      map[uuid.UUID]domain.Player{},
 		sessions:     map[uuid.UUID]domain.Session{},
+		situations:   map[uuid.UUID][]domain.Situation{},
+		messageCount: map[uuid.UUID]int{},
 		progress:     map[string]domain.LessonProgress{},
+		passedRuns:   map[string]map[uuid.UUID]bool{},
 		correct:      map[string]bool{},
 		awarded:      map[string]bool{},
 		prizeEntries: map[string]domain.PrizeCreditEntry{},
@@ -133,6 +139,7 @@ func (f *fakeLearningStore) GetLessonProgress(_ context.Context, playerID uuid.U
 	if !ok {
 		return domain.LessonProgress{}, repo.ErrNotFound
 	}
+	p.PracticePassCount = len(f.passedRuns[lpKey(playerID, lessonID)])
 	return p, nil
 }
 
@@ -156,6 +163,17 @@ func (f *fakeLearningStore) HasCorrectLessonAnswer(_ context.Context, playerID u
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.correct[playerID.String()+"|"+lessonID+"|"+questionID], nil
+}
+
+func (f *fakeLearningStore) RecordPassedLessonPractice(_ context.Context, playerID uuid.UUID, lessonID string, sessionID uuid.UUID) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := lpKey(playerID, lessonID)
+	if f.passedRuns[key] == nil {
+		f.passedRuns[key] = map[uuid.UUID]bool{}
+	}
+	f.passedRuns[key][sessionID] = true
+	return len(f.passedRuns[key]), nil
 }
 
 // AwardLessonCompletion mirrors the postgres implementation's idempotency
@@ -194,8 +212,12 @@ func (f *fakeLearningStore) GetSession(_ context.Context, id uuid.UUID) (domain.
 	return s, nil
 }
 
-func (f *fakeLearningStore) ListSituationsBySession(_ context.Context, _ uuid.UUID) ([]domain.Situation, error) {
-	return nil, nil
+func (f *fakeLearningStore) ListSituationsBySession(_ context.Context, id uuid.UUID) ([]domain.Situation, error) {
+	return f.situations[id], nil
+}
+
+func (f *fakeLearningStore) CountPlayerMessages(_ context.Context, situationID uuid.UUID) (int, error) {
+	return f.messageCount[situationID], nil
 }
 
 // testLearningCurriculum fabricates a two-lesson curriculum, independent of
@@ -334,8 +356,50 @@ func TestFinalizePracticeBeforePassReportsMissing(t *testing.T) {
 	if result.Completed {
 		t.Fatalf("expected not completed: %+v", result)
 	}
-	if len(result.Missing) != 1 || result.Missing[0] != "practice_pass" {
-		t.Fatalf("expected missing=[practice_pass], got %+v", result.Missing)
+	if len(result.Missing) != 2 || result.Missing[0] != "practice_pass" || result.Missing[1] != "practice_runs" {
+		t.Fatalf("expected practice_pass and practice_runs missing, got %+v", result.Missing)
+	}
+}
+
+func TestConversationPracticeRequiresCompletedDialogue(t *testing.T) {
+	store := newFakeLearningStore()
+	curriculum := testLearningCurriculum()
+	curriculum.Lessons[1].CompletionRule = "scenario_result"
+	curriculum.Lessons[1].MandatoryEventIDs = []string{"cold"}
+	svc := newTestLearningService(store, content.Catalog{}, content.WagonClasses{}, curriculum, nil, nil)
+	ctx := context.Background()
+	playerID := uuid.New()
+	session, err := store.CreateWagonSession(ctx, playerID, domain.WagonState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Status = domain.SessionStatusFinished
+	store.sessions[session.ID] = session
+	store.progress[lpKey(playerID, "L2")] = domain.LessonProgress{
+		PlayerID: playerID, LessonID: "L2", TheoryPass: true, PracticeCheckPass: true, PracticeSessionID: &session.ID,
+	}
+	check := func(want bool) {
+		t.Helper()
+		result, err := svc.FinalizePractice(ctx, playerID, "L2")
+		if err != nil || result.ScenarioPass == nil || *result.ScenarioPass != want {
+			t.Fatalf("scenario pass=%v, want %v: %+v, %v", result.ScenarioPass, want, result, err)
+		}
+		if result.Completed || result.PracticePassCount != 0 && !want {
+			t.Fatalf("invalid practice completion: %+v", result)
+		}
+	}
+	check(false) // An empty session used to pass vacuously.
+	id, scenarioID, success := uuid.New(), "cold", "success"
+	store.situations[session.ID] = []domain.Situation{{ID: id, SessionID: session.ID, SituationDefID: &scenarioID, Status: domain.SituationStatusActive}}
+	check(false)
+	store.situations[session.ID][0].Status = domain.SituationStatusClosed
+	store.situations[session.ID][0].Outcome = &success
+	check(false) // A closed situation without a player message is not a conversation.
+	store.messageCount[id] = 1
+	check(true)
+	progress, err := store.GetLessonProgress(ctx, playerID, "L2")
+	if err != nil || progress.PracticePassCount != 1 {
+		t.Fatalf("successful conversation should count as one run: %+v, %v", progress, err)
 	}
 }
 
@@ -346,13 +410,15 @@ func TestFinalizePracticeAwardsXPExactlyOnceOnRepeat(t *testing.T) {
 	playerID := uuid.New()
 	store.players[playerID] = domain.Player{ID: playerID}
 
-	// This session's WagonState already satisfies L1's visit_inspect
-	// requirement, so the first finalize should pass practice and award.
+	// Two distinct completed sessions are required. Re-finalizing either
+	// session must not increment the count or grant another reward.
 	state := domain.WagonState{VisitedAnchors: []string{"a1"}, InspectedObjects: []string{"o1"}}
 	sess, err := store.CreateWagonSession(ctx, playerID, state)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sess.Status = domain.SessionStatusFinished
+	store.sessions[sess.ID] = sess
 	sessID := sess.ID
 	if err := store.UpsertLessonProgress(ctx, domain.LessonProgress{
 		PlayerID: playerID, LessonID: "L1", TheoryPass: true, PracticeCheckPass: true, PracticeSessionID: &sessID,
@@ -364,20 +430,42 @@ func TestFinalizePracticeAwardsXPExactlyOnceOnRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.Completed || !first.AwardGranted || first.XPAwarded != lessonCompletionXP {
-		t.Fatalf("expected first finalize to complete and award XP: %+v", first)
+	if first.Completed || first.PracticePassCount != 1 || first.AwardGranted {
+		t.Fatalf("expected first practice to count once without completion: %+v", first)
+	}
+	repeatedFirst, err := svc.FinalizePractice(ctx, playerID, "L1")
+	if err != nil || repeatedFirst.PracticePassCount != 1 || repeatedFirst.Completed {
+		t.Fatalf("re-finalizing one session must not count twice: %+v, %v", repeatedFirst, err)
+	}
+	secondSession, err := store.CreateWagonSession(ctx, playerID, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSession.Status = domain.SessionStatusFinished
+	store.sessions[secondSession.ID] = secondSession
+	progress, err := store.GetLessonProgress(ctx, playerID, "L1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress.PracticeSessionID = &secondSession.ID
+	if err := store.UpsertLessonProgress(ctx, progress); err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.FinalizePractice(ctx, playerID, "L1")
+	if err != nil || !second.Completed || !second.AwardGranted || second.PracticePassCount != 2 || second.XPAwarded != lessonCompletionXP {
+		t.Fatalf("expected second distinct practice to complete and award XP: %+v, %v", second, err)
 	}
 	player, err := store.GetPlayerByID(ctx, playerID)
 	if err != nil || player.TotalXP != lessonCompletionXP {
 		t.Fatalf("expected total_xp=%d after first award, got %+v (%v)", lessonCompletionXP, player, err)
 	}
 
-	second, err := svc.FinalizePractice(ctx, playerID, "L1")
+	third, err := svc.FinalizePractice(ctx, playerID, "L1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second.Completed || second.AwardGranted {
-		t.Fatalf("expected second finalize to be idempotent, no new award: %+v", second)
+	if !third.Completed || third.AwardGranted || third.PracticePassCount != 2 {
+		t.Fatalf("expected repeated finalize to be idempotent, no new award: %+v", third)
 	}
 	player, err = store.GetPlayerByID(ctx, playerID)
 	if err != nil || player.TotalXP != lessonCompletionXP {

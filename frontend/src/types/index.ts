@@ -416,6 +416,7 @@ export interface LessonProgress {
   theory_pass: boolean
   practice_session_id?: string
   practice_pass: boolean
+  practice_pass_count: number
   practice_check_pass: boolean
   completed_at?: string
   content_version: string
@@ -442,7 +443,9 @@ export interface LessonAnswerResult {
 
 export interface LessonFinalizeResult {
   completed: boolean
-  missing?: Array<'theory_pass' | 'practice_pass' | 'practice_check_pass'>
+  missing?: Array<'theory_pass' | 'practice_pass' | 'practice_check_pass' | 'practice_runs'>
+  practice_pass_count: number
+  practice_pass_required: number
   award_granted: boolean
   xp_awarded?: number
   badge_id?: string
