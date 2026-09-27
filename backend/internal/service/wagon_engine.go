@@ -217,6 +217,59 @@ func ApplyGiveItem(state domain.WagonState, situationID uuid.UUID, item string) 
 	return state, nil
 }
 
+// ApplyVisit records that the player has visited anchor at least once. It
+// requires the player to be stationary (matching every other wagon action's
+// convention) and the anchor to be a real one for this class — the caller
+// passes the class's Anchors list for validation, same pattern as
+// ApplyWagonMove.
+func ApplyVisit(state domain.WagonState, cfg content.WagonClassConfig, anchor string) (domain.WagonState, error) {
+	if err := requireStationary(state); err != nil {
+		return state, err
+	}
+	valid := false
+	for _, a := range cfg.Anchors {
+		if a == anchor {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return state, ErrInvalidWagonAction
+	}
+	state.VisitedAnchors = addSorted(state.VisitedAnchors, anchor)
+	return state, nil
+}
+
+// ApplyInspect records that the player has inspected a named object. Unlike
+// anchors, objects are not validated against WagonClassConfig.Anchors (they
+// are things like "water" or "extinguisher_location" that live at an
+// anchor, not anchors themselves) — any non-empty object name is accepted;
+// validating the object is a real, reachable thing for the current lesson
+// is a later task's job (content-level), not this primitive's.
+func ApplyInspect(state domain.WagonState, object string) (domain.WagonState, error) {
+	if err := requireStationary(state); err != nil {
+		return state, err
+	}
+	if object == "" {
+		return state, ErrInvalidWagonAction
+	}
+	state.InspectedObjects = addSorted(state.InspectedObjects, object)
+	return state, nil
+}
+
+// addSorted returns list with item added if not already present, keeping
+// the result sorted for deterministic JSON/tests. list is never mutated.
+func addSorted(list []string, item string) []string {
+	for _, existing := range list {
+		if existing == item {
+			return list
+		}
+	}
+	next := append(append([]string{}, list...), item)
+	sort.Strings(next)
+	return next
+}
+
 func ApplyRedirect(state domain.WagonState, situationID uuid.UUID) (domain.WagonState, error) {
 	if err := requireStationary(state); err != nil {
 		return state, err

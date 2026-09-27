@@ -109,4 +109,21 @@ type Store interface {
 	ListMessagesBySituation(ctx context.Context, situationID uuid.UUID) ([]domain.Message, error)
 	CountPlayerMessages(ctx context.Context, situationID uuid.UUID) (int, error)
 	UpdateMessageCategory(ctx context.Context, id int, category string) error
+
+	// Learning
+	GetLessonProgress(ctx context.Context, playerID uuid.UUID, lessonID string) (domain.LessonProgress, error) // ErrNotFound if no row yet: caller treats that as "not started"
+	UpsertLessonProgress(ctx context.Context, p domain.LessonProgress) error                                   // full replace, PK on (player_id, lesson_id)
+	RecordLessonAnswer(ctx context.Context, playerID uuid.UUID, lessonID, questionID, optionID string, correct bool) error
+	HasCorrectLessonAnswer(ctx context.Context, playerID uuid.UUID, lessonID, questionID string) (bool, error)                 // true iff any past answer for this question was correct
+	AwardLessonCompletion(ctx context.Context, playerID uuid.UUID, lessonID string, xpDelta int, badgeID string) (bool, error) // atomic INSERT ... ON CONFLICT DO NOTHING; returns whether it actually inserted (false = already awarded)
+
+	// Prize credits
+	AwardPrizeCredit(ctx context.Context, playerID uuid.UUID, sourceType, sourceID string, amount int, awardedAt, expiresAt time.Time) (bool, error) // INSERT ... ON CONFLICT (player_id, source_type, source_id) DO NOTHING; returns whether it actually inserted (false = already awarded)
+	PrizeCreditBalance(ctx context.Context, playerID uuid.UUID, now time.Time) (balance int, nextExpiry *time.Time, err error)                       // sums amount WHERE expires_at > now; nextExpiry is the soonest still-active expires_at, nil if none
+
+	// Push
+	RegisterPushSubscription(ctx context.Context, playerID uuid.UUID, platform, deviceToken string) error
+	ListPushSubscriptions(ctx context.Context, playerID uuid.UUID) ([]domain.PushSubscription, error)
+	MarkPushNotificationSent(ctx context.Context, playerID uuid.UUID, eventType, sourceID string) (bool, error)                     // false = already sent (unique violation caught)
+	ListExpiringPrizeCreditsUnnotified(ctx context.Context, within time.Duration, now time.Time) ([]domain.PrizeCreditEntry, error) // active entries expiring within `within` of `now` that have no matching push_notifications_sent row for event_type="prize_credit_expiring"
 }

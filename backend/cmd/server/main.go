@@ -21,6 +21,7 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/handler"
 	"github.com/mostransport/vsm-trainer/internal/llm"
 	appmiddleware "github.com/mostransport/vsm-trainer/internal/middleware"
+	"github.com/mostransport/vsm-trainer/internal/push"
 	"github.com/mostransport/vsm-trainer/internal/repo/postgres"
 	"github.com/mostransport/vsm-trainer/internal/service"
 	"github.com/mostransport/vsm-trainer/internal/simulation"
@@ -50,6 +51,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load wagon levels: %w", err)
 	}
+	curriculum, err := content.LoadCurriculum()
+	if err != nil {
+		return fmt.Errorf("load curriculum: %w", err)
+	}
 	simTemplate, err := simulation.Load()
 	if err != nil {
 		return fmt.Errorf("load simulation template: %w", err)
@@ -61,6 +66,14 @@ func run() error {
 		return err
 	}
 	defer store.Close()
+
+	if cfg.AdminBootstrapEmail != "" && cfg.AdminBootstrapPassword != "" {
+		if admin, err := store.BootstrapAdmin(ctx, cfg.AdminBootstrapEmail, cfg.AdminBootstrapPassword); err != nil {
+			slog.Error("admin bootstrap failed", "email", cfg.AdminBootstrapEmail, "error", err)
+		} else {
+			slog.Info("admin bootstrap ready", "email", admin.Email)
+		}
+	}
 
 	var client llm.LLMClient
 	switch cfg.LLMMode {
@@ -92,6 +105,15 @@ func run() error {
 		return fmt.Errorf("recover wagon sessions: %w", err)
 	}
 	wagonService := service.NewWagonService(store, wagonCatalog, wagonClasses, wagonLevels, wagonManager)
+	prizeService := service.NewPrizeService(store)
+	// The default Sender just logs -- real Expo/FCM delivery is blocked on
+	// the mobile team's credentials and expo-notifications setup (see
+	// internal/push's package doc). Swapping it for a real implementation
+	// later is a one-file follow-up, selected here the same way LLM_MODE
+	// selects llm.LLMClient above, once there's more than one Sender.
+	pushSender := push.NewLogSender()
+	pushService := service.NewPushService(store, pushSender)
+	learningService := service.NewLearningService(store, wagonCatalog, wagonClasses, curriculum, wagonService, wagonManager, prizeService, pushService)
 	h := &handler.Handlers{
 		Auth:         auth,
 		Profile:      service.NewProfileService(store, cfg.PointsNamespace),
@@ -102,6 +124,9 @@ func run() error {
 		Wagon:        wagonService,
 		WagonManager: wagonManager,
 		WagonClasses: wagonClasses,
+		Learning:     learningService,
+		Prize:        prizeService,
+		Push:         pushService,
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -124,6 +149,25 @@ func run() error {
 				}
 				if err := simulationService.CloseExpired(ctx); err != nil {
 					slog.Error("simulation timer closer failed", "error", err)
+				}
+			}
+		}
+	}()
+	// Prize-credit expiry runs on its own, much longer-interval ticker in a
+	// separate goroutine: checking a 24h expiry window every 2 seconds (the
+	// situations/simulation timer loop's cadence) would be wasteful, and a
+	// separate ticker/goroutine keeps the two cadences independent instead
+	// of one loop juggling two intervals.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := pushService.SweepExpiringPrizeCredits(ctx); err != nil {
+					slog.Error("prize expiry push sweep failed", "error", err)
 				}
 			}
 		}
@@ -190,6 +234,13 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/situation/{id}/message", h.SendMessage)
 		r.Post("/situation/{id}/escalate", h.Escalate)
 		r.Post("/situation/{id}/finish", h.FinishSituation)
+		r.Get("/learning/map", h.GetLearningMap)
+		r.Get("/learning/lessons/{id}", h.GetLesson)
+		r.Post("/learning/lessons/{id}/answers", h.SubmitLessonAnswer)
+		r.Post("/learning/lessons/{id}/practice", h.StartLessonPractice)
+		r.Post("/learning/lessons/{id}/finalize", h.FinalizeLessonPractice)
+		r.Get("/me/learning", h.GetMyLearning)
+		r.Post("/me/push-subscriptions", h.RegisterPushSubscription)
 	})
 	r.Get("/api/wagon/{id}/ws", h.WagonWS)
 	r.Route("/admin", func(r chi.Router) {
@@ -198,6 +249,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/players", h.CreatePlayerAccount)
 		r.Get("/users/{id}/learning-summary", h.LearningSummary)
 		r.Post("/sessions/{id}/approve", h.ApproveSession)
+		r.Post("/users/{id}/prize-credits/demo-seed", h.SeedDemoPrizeEntry)
 	})
 	return r
 }

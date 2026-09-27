@@ -1,0 +1,39 @@
+[
+  {
+    "lesson_id": "B01", "chapter_id": "ch1", "order": 1,
+    "title": "Первый маршрут", "badge_id": "badge_first_route", "estimated_min": 5,
+    "theory_cards": [
+      "Это твой первый учебный рейс. До просьб пассажиров осмотрись: места, туалет, сервисная точка и служебные границы находятся в разных частях вагона.",
+      "Чтобы запомнить место предмета, подойди и нажми «Осмотреть». Найти воду или огнетушитель в тренажёре — значит узнать точку на карте, а не выполнить работу с оборудованием.",
+      "Вход к кабине отмечен как граница. Найти его полезно для ориентирования; входить или пользоваться оборудованием без отдельного разрешённого сценария игра не предлагает."
+    ],
+    "theory_question_ids": ["B01-T1", "B01-T2"],
+    "scenario_id": "", "mandatory_event_ids": [],
+    "required_anchor_ids": ["sanitary_zone", "service_zone", "cab_entrance_boundary"],
+    "required_object_ids": ["water", "extinguisher_location"],
+    "practice_question_ids": ["B01-P1", "B01-P2"],
+    "completion_rule": "visit_inspect",
+    "debrief_intro": "Ниже — что удалось найти в этом рейсе, а что нет.",
+    "target_competencies": ["awareness"],
+    "source_refs": ["GDD v2.0 §29 B01"],
+    "validation_status": "draft"
+  },
+  {
+    "lesson_id": "B02", "chapter_id": "ch1", "order": 2,
+    "title": "Первый разговор", "badge_id": "badge_first_contact", "estimated_min": 5,
+    "theory_cards": [
+      "Один пассажир смотрит по сторонам. Это повод подойти, но взгляд не сообщает, нужна ли ему вода, маршрут или что-то другое.",
+      "Сначала подойди и начни разговор. Открытый вопрос помогает узнать фактическую просьбу; догадка до ответа пассажира остаётся только догадкой.",
+      "После разговора отдели то, что пассажир сказал, от того, что ты предположил. В тренажёре следующий шаг выбирается по известному запросу."
+    ],
+    "theory_question_ids": ["B02-T1", "B02-T2"],
+    "scenario_id": "cold", "mandatory_event_ids": ["cold"],
+    "required_anchor_ids": [], "required_object_ids": [],
+    "practice_question_ids": ["B02-P1", "B02-P2"],
+    "completion_rule": "scenario_result",
+    "debrief_intro": "Ниже — что было наблюдаемым сигналом, что сказал пассажир, а что было только предположением.",
+    "target_competencies": ["communication"],
+    "source_refs": ["GDD v2.0 §29 B02"],
+    "validation_status": "draft"
+  }
+]

@@ -29,6 +29,9 @@ type Config struct {
 
 	SituationsPerSession int
 	PointsNamespace      string
+
+	AdminBootstrapEmail    string
+	AdminBootstrapPassword string
 }
 
 func Load() *Config {
@@ -53,6 +56,9 @@ func Load() *Config {
 
 		SituationsPerSession: envInt("SITUATIONS_PER_SESSION", 4),
 		PointsNamespace:      env("POINTS_NAMESPACE", "demo"),
+
+		AdminBootstrapEmail:    os.Getenv("ADMIN_BOOTSTRAP_EMAIL"),
+		AdminBootstrapPassword: os.Getenv("ADMIN_BOOTSTRAP_PASSWORD"),
 	}
 }
 

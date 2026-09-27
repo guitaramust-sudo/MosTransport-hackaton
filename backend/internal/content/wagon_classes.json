@@ -38,6 +38,28 @@
     "status": "coming_soon"
   },
   "first": {
-    "status": "coming_soon"
+    "status": "available",
+    "anchors": [
+      "seat_1",
+      "seat_2",
+      "sanitary_zone",
+      "service_zone",
+      "cab_entrance_boundary"
+    ],
+    "restricted_anchors": [
+      "cab_entrance_boundary"
+    ],
+    "seat_anchors": [
+      "seat_1",
+      "seat_2"
+    ],
+    "service_point_anchor": "service_zone",
+    "session_duration_s": 480,
+    "tick_s": 1,
+    "spawn_check_interval_s": 3,
+    "spawn_probability": 0.12,
+    "max_concurrent_situations": 1,
+    "move_duration_s": 3,
+    "redirect_duration_s": 20
   }
 }

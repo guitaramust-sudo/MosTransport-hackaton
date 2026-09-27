@@ -122,6 +122,42 @@ func TestWagonGiveItemRequiresActualPlayerPositionAndInventory(t *testing.T) {
 	}
 }
 
+func TestApplyVisitRecordsAnchorOnceAndValidatesIt(t *testing.T) {
+	cfg := content.WagonClassConfig{Anchors: []string{"seat_1", "sanitary_zone", "service_zone"}}
+	state := domain.WagonState{Player: domain.WagonActor{At: "seat_1"}}
+	visited, err := ApplyVisit(state, cfg, "sanitary_zone")
+	if err != nil || len(visited.VisitedAnchors) != 1 || visited.VisitedAnchors[0] != "sanitary_zone" {
+		t.Fatalf("visit failed: %+v, %v", visited, err)
+	}
+	again, err := ApplyVisit(visited, cfg, "sanitary_zone")
+	if err != nil || len(again.VisitedAnchors) != 1 {
+		t.Fatalf("visit should be idempotent: %+v, %v", again, err)
+	}
+	if _, err := ApplyVisit(state, cfg, "not_a_real_anchor"); !errors.Is(err, ErrInvalidWagonAction) {
+		t.Fatalf("expected ErrInvalidWagonAction for unknown anchor: %v", err)
+	}
+	moving := state
+	moving.Player.Moving = &domain.WagonMove{From: "seat_1", To: "service_zone", DurationS: 3}
+	if _, err := ApplyVisit(moving, cfg, "service_zone"); !errors.Is(err, ErrAlreadyMoving) {
+		t.Fatalf("expected ErrAlreadyMoving while in transit: %v", err)
+	}
+}
+
+func TestApplyInspectRecordsObjectOnceAndRejectsEmpty(t *testing.T) {
+	state := domain.WagonState{Player: domain.WagonActor{At: "service_zone"}}
+	inspected, err := ApplyInspect(state, "water")
+	if err != nil || len(inspected.InspectedObjects) != 1 || inspected.InspectedObjects[0] != "water" {
+		t.Fatalf("inspect failed: %+v, %v", inspected, err)
+	}
+	again, err := ApplyInspect(inspected, "water")
+	if err != nil || len(again.InspectedObjects) != 1 {
+		t.Fatalf("inspect should be idempotent: %+v, %v", again, err)
+	}
+	if _, err := ApplyInspect(state, ""); !errors.Is(err, ErrInvalidWagonAction) {
+		t.Fatalf("expected ErrInvalidWagonAction for empty object: %v", err)
+	}
+}
+
 func TestWagonRestrictedArrivalAndLateRedirect(t *testing.T) {
 	id := uuid.New()
 	start := time.Now()

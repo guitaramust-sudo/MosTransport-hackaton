@@ -94,3 +94,21 @@ func (h *Handlers) LearningSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, summary)
 }
+
+// SeedDemoPrizeEntry grants the fixed +40 demo prize-credit entry (see
+// PrizeService.SeedDemoEntry) to the given player. It is an admin-only test
+// seeding action -- registered under the AdminAuth-gated /admin route
+// group, never reachable by a normal player.
+func (h *Handlers) SeedDemoPrizeEntry(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	granted, err := h.Prize.SeedDemoEntry(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"granted": granted})
+}

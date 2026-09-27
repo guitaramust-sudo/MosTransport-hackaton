@@ -16,6 +16,8 @@ type WagonState struct {
 	CarriedItems      []string    `json:"carried_items"`
 	StartedAt         time.Time   `json:"started_at"`
 	DurationS         int         `json:"duration_s"`
+	VisitedAnchors    []string    `json:"visited_anchors,omitempty"`
+	InspectedObjects  []string    `json:"inspected_objects,omitempty"`
 }
 
 type WagonSeat struct {

@@ -19,6 +19,9 @@ type Handlers struct {
 	Wagon        *service.WagonService
 	WagonManager *service.WagonManager
 	WagonClasses content.WagonClasses
+	Learning     *service.LearningService
+	Prize        *service.PrizeService
+	Push         *service.PushService
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

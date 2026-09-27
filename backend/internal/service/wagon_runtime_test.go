@@ -193,6 +193,69 @@ func TestWagonRuntimeTickSpawnsAndPersists(t *testing.T) {
 	}
 }
 
+// TestWagonManagerStartScriptedSeedsMandatoryScenarioAndStaysQuiet exercises
+// StartScripted: it must seed the given scenario onto the first idle seat
+// eagerly (not via PickWagonSpawns's probability roll), and — given an empty
+// content.Level{} companion (no TypeWeights) — a later tick must not also
+// randomly spawn onto the still-idle second seat, even with
+// SpawnProbability at 1. This confirms PickWagonSpawns really does stay
+// silent with no TypeWeights, rather than just trusting that as a documented
+// assumption.
+func TestWagonManagerStartScriptedSeedsMandatoryScenarioAndStaysQuiet(t *testing.T) {
+	f := newFakeWagonStore()
+	catalog := content.Catalog{
+		Scenarios:  []content.Scenario{{ID: "cold", Type: content.TypeService, Criticality: content.CritLow}},
+		Passengers: []content.Passenger{{ID: "p1", PromptHint: "H", Language: "ru"}},
+	}
+	state := domain.WagonState{
+		ClassID:   "first",
+		StartedAt: time.Now(),
+		DurationS: 100,
+		Player:    domain.WagonActor{At: "service_zone"},
+		Seats: []domain.WagonSeat{
+			{Anchor: "seat_1", PassengerDefID: "p1", Actor: domain.WagonActor{At: "seat_1"}},
+			{Anchor: "seat_2", PassengerDefID: "p1", Actor: domain.WagonActor{At: "seat_2"}},
+		},
+	}
+	sess, err := f.CreateWagonSession(context.Background(), uuid.New(), state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := content.WagonClassConfig{SessionDurationS: 100, MaxConcurrentSituations: 2, SpawnProbability: 1, TickS: 1, SpawnCheckIntervalS: 1}
+	mgr := NewWagonManager(f, catalog, nil)
+	mgr.StartScripted(sess.ID, cfg, content.Level{}, state, []string{"cold"})
+
+	rt := mgr.runtime(sess.ID)
+	if rt == nil {
+		t.Fatal("runtime not registered")
+	}
+	// Halt the loop goroutine before touching rt directly from this
+	// goroutine, and before driving tick() by hand below.
+	mgr.Stop(sess.ID)
+
+	if rt.state.Seats[0].SituationID == nil {
+		t.Fatalf("expected seat 0 seeded eagerly, got %+v", rt.state.Seats[0])
+	}
+	if rt.state.Seats[1].SituationID != nil {
+		t.Fatalf("expected seat 1 to stay idle, got %+v", rt.state.Seats[1])
+	}
+	sit, err := f.GetSituation(context.Background(), *rt.state.Seats[0].SituationID)
+	if err != nil || sit.SessionID != sess.ID || sit.SituationDefID == nil || *sit.SituationDefID != "cold" {
+		t.Fatalf("scripted scenario not created correctly: %+v, %v", sit, err)
+	}
+
+	// Drive persistence + the spawn-check path once by hand (loop goroutine
+	// is stopped, so this is single-goroutine and race-free).
+	rt.tick(time.Now())
+	if rt.state.Seats[1].SituationID != nil {
+		t.Fatalf("unexpected random spawn with empty level TypeWeights: %+v", rt.state.Seats[1])
+	}
+	got, err := f.GetSession(context.Background(), sess.ID)
+	if err != nil || got.WagonState.Seats[0].SituationDefID == nil || *got.WagonState.Seats[0].SituationDefID != "cold" {
+		t.Fatalf("scripted seat not persisted: %+v, %v", got.WagonState, err)
+	}
+}
+
 func TestWagonRuntimeRejectsWrongItemAndRemoteDelivery(t *testing.T) {
 	f := newFakeWagonStore()
 	state := domain.WagonState{Player: domain.WagonActor{At: "service_point"}, CarriedItems: []string{"blanket"}, Seats: []domain.WagonSeat{{Anchor: "seat_1", Actor: domain.WagonActor{At: "seat_1"}}}}

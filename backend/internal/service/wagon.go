@@ -32,6 +32,20 @@ func NewWagonService(store wagonStore, catalog content.Catalog, classes content.
 	return &WagonService{store: store, catalog: catalog, classes: classes, levels: levels, manager: manager}
 }
 
+// buildWagonSeats assigns each of cfg.SeatAnchors a random passenger from
+// catalog, with each seat's actor starting at its own anchor. Shared by
+// WagonService.StartSession (random level starts) and
+// LearningService.StartPractice (lesson-driven starts) so this loop lives
+// in exactly one place.
+func buildWagonSeats(catalog content.Catalog, cfg content.WagonClassConfig, rng *rand.Rand) []domain.WagonSeat {
+	seats := make([]domain.WagonSeat, len(cfg.SeatAnchors))
+	for i, anchor := range cfg.SeatAnchors {
+		passenger := catalog.Passengers[rng.Intn(len(catalog.Passengers))]
+		seats[i] = domain.WagonSeat{Anchor: anchor, PassengerDefID: passenger.ID, Actor: domain.WagonActor{At: anchor}}
+	}
+	return seats
+}
+
 func (s *WagonService) StartSession(ctx context.Context, playerID uuid.UUID, levelID string) (domain.Session, error) {
 	level, ok := levelByID(s.levels, levelID)
 	if !ok {
@@ -52,11 +66,7 @@ func (s *WagonService) StartSession(ctx context.Context, playerID uuid.UUID, lev
 		return domain.Session{}, ErrNoEligibleScenarios
 	}
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	seats := make([]domain.WagonSeat, len(cfg.SeatAnchors))
-	for i, anchor := range cfg.SeatAnchors {
-		passenger := s.catalog.Passengers[rng.Intn(len(s.catalog.Passengers))]
-		seats[i] = domain.WagonSeat{Anchor: anchor, PassengerDefID: passenger.ID, Actor: domain.WagonActor{At: anchor}}
-	}
+	seats := buildWagonSeats(s.catalog, cfg, rng)
 	state := domain.WagonState{ClassID: level.ClassID, LevelID: level.ID, RestrictedAnchors: append([]string(nil), cfg.RestrictedAnchors...), Seats: seats,
 		Player: domain.WagonActor{At: cfg.ServicePointAnchor}, CarriedItems: []string{}, StartedAt: time.Now(), DurationS: cfg.SessionDurationS}
 	sess, err := s.store.CreateWagonSession(ctx, playerID, state)

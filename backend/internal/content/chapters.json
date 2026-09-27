@@ -1,0 +1,8 @@
+[
+  {"chapter_id": "ch1", "order": 1, "title": "Глава 1. Первый рейс", "lesson_ids": ["B01", "B02"], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"},
+  {"chapter_id": "ch2", "order": 2, "title": "Глава 2 (скоро)", "lesson_ids": [], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"},
+  {"chapter_id": "ch3", "order": 3, "title": "Глава 3 (скоро)", "lesson_ids": [], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"},
+  {"chapter_id": "ch4", "order": 4, "title": "Глава 4 (скоро)", "lesson_ids": [], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"},
+  {"chapter_id": "ch5", "order": 5, "title": "Глава 5 (скоро)", "lesson_ids": [], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"},
+  {"chapter_id": "ch6", "order": 6, "title": "Глава 6 (скоро)", "lesson_ids": [], "scope": "class", "class_id": "first", "content_version": "1.0.0", "validation_status": "draft"}
+]

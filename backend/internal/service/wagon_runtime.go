@@ -65,15 +65,54 @@ func levelByID(levels content.Levels, id string) (content.Level, bool) {
 	return content.Level{}, false
 }
 
+// newWagonRuntime builds a wagonRuntime with all of its channels and rng
+// wired up. Shared by Start and StartScripted so the ~10 field initializers
+// live in exactly one place.
+func newWagonRuntime(sessionID uuid.UUID, store wagonStore, catalog content.Catalog, cfg content.WagonClassConfig, level content.Level, state domain.WagonState) *wagonRuntime {
+	return &wagonRuntime{sessionID: sessionID, store: store, catalog: catalog, cfg: cfg, level: level, state: state,
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())), commands: make(chan wagonCommand), attach: make(chan wagonAttach), detach: make(chan *websocket.Conn), stop: make(chan struct{}), done: make(chan struct{})}
+}
+
 func (m *WagonManager) Start(sessionID uuid.UUID, cfg content.WagonClassConfig, level content.Level, state domain.WagonState) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, exists := m.runtimes[sessionID]; exists {
+		m.mu.Unlock()
 		return
 	}
-	rt := &wagonRuntime{sessionID: sessionID, store: m.store, catalog: m.catalog, cfg: cfg, level: level, state: state,
-		rng: rand.New(rand.NewSource(time.Now().UnixNano())), commands: make(chan wagonCommand), attach: make(chan wagonAttach), detach: make(chan *websocket.Conn), stop: make(chan struct{}), done: make(chan struct{})}
+	rt := newWagonRuntime(sessionID, m.store, m.catalog, cfg, level, state)
 	m.runtimes[sessionID] = rt
+	m.mu.Unlock()
+	go rt.loop()
+}
+
+// StartScripted is like Start, but immediately seeds mandatoryScenarioIDs as
+// active situations — one per idle seat, in the order given — instead of
+// relying on PickWagonSpawns's probability roll. It's for scripted lesson
+// sessions (e.g. lesson B02 always needs the "cold" scenario active on one
+// seat, deterministically) rather than the random weighted sampling regular
+// levels use. Pass an empty content.Level{} for level if the session should
+// never randomly spawn anything beyond the scripted scenarios:
+// PickWagonSpawns already returns nil forever when a Level has no
+// TypeWeights with a positive value, since no scenario type is ever
+// eligible — this is existing, unmodified behavior, just relied upon here
+// rather than changed. Start's signature/behavior is untouched; this is
+// purely additive.
+func (m *WagonManager) StartScripted(sessionID uuid.UUID, cfg content.WagonClassConfig, level content.Level, state domain.WagonState, mandatoryScenarioIDs []string) {
+	m.mu.Lock()
+	if _, exists := m.runtimes[sessionID]; exists {
+		m.mu.Unlock()
+		return
+	}
+	rt := newWagonRuntime(sessionID, m.store, m.catalog, cfg, level, state)
+	m.runtimes[sessionID] = rt
+	m.mu.Unlock()
+	now := time.Now()
+	for i, scenarioID := range mandatoryScenarioIDs {
+		if i >= len(rt.state.Seats) {
+			break
+		}
+		rt.spawn(now, WagonSpawnDecision{SeatIndex: i, ScenarioID: scenarioID})
+	}
 	go rt.loop()
 }
 
@@ -252,6 +291,10 @@ func (rt *wagonRuntime) handle(now time.Time, cmd wagonCommand) error {
 	switch cmd.kind {
 	case "move_to":
 		next, err = ApplyWagonMove(rt.state, cmd.anchor, rt.cfg, now)
+	case "visit":
+		next, err = ApplyVisit(rt.state, rt.cfg, cmd.anchor)
+	case "inspect":
+		next, err = ApplyInspect(rt.state, cmd.item)
 	case "pick_item":
 		allowed := false
 		for _, s := range rt.catalog.Scenarios {
