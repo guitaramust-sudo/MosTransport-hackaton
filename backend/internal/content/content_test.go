@@ -58,8 +58,6 @@ func TestCatalogRejectsInvalidData(t *testing.T) {
 		{"duplicate scenario", func(c *Catalog) { c.Scenarios[1].ID = c.Scenarios[0].ID }, "duplicate id"},
 		{"bad type", func(c *Catalog) { c.Scenarios[0].Type = "unknown" }, "invalid type"},
 		{"bad criticality", func(c *Catalog) { c.Scenarios[0].Criticality = "unknown" }, "invalid criticality"},
-		{"missing validation", func(c *Catalog) { c.Scenarios[0].ValidationStatus = "" }, "invalid validation_status"},
-		{"approved without review", func(c *Catalog) { c.Scenarios[0].ValidationStatus = "approved" }, "requires reviewer_id"},
 		{"missing point", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.MustConvey = nil }, "must_convey"},
 		{"duplicate point", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.MustConvey[1].ID = "A" }, "duplicate must_convey"},
 		{"bad target", func(c *Catalog) { c.Scenarios[0].CorrectCompletion.Escalation.To[0] = "station" }, "escalation target"},
@@ -95,7 +93,7 @@ func TestParseRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestPhysicalRequirementValidation(t *testing.T) {
-	base := Scenario{ID: "s", Type: TypeService, Criticality: CritLow, ValidationStatus: "draft", Title: "T", Opening: "O", TimeLimitSec: 30,
+	base := Scenario{ID: "s", Type: TypeService, Criticality: CritLow, Title: "T", Opening: "O", TimeLimitSec: 30,
 		CorrectCompletion:   CorrectCompletion{MustConvey: []MustConvey{{ID: "A", Desc: "D", PhysicalAction: true}}},
 		PhysicalRequirement: &PhysicalRequirement{Kind: "deliver_item", Item: "blanket"}}
 	check := func(s Scenario) error {

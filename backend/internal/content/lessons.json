@@ -15,8 +15,7 @@
     "completion_rule": "visit_inspect",
     "debrief_intro": "Ниже — что удалось найти в этом рейсе, а что нет.",
     "target_competencies": ["awareness"],
-    "source_refs": ["GDD v2.0 §29 B01"],
-    "validation_status": "draft"
+    "source_refs": ["GDD v2.0 §29 B01"]
   },
   {
     "lesson_id": "B02", "chapter_id": "ch1", "order": 2,
@@ -33,7 +32,6 @@
     "completion_rule": "scenario_result",
     "debrief_intro": "Ниже — что было наблюдаемым сигналом, что сказал пассажир, а что было только предположением.",
     "target_competencies": ["communication"],
-    "source_refs": ["GDD v2.0 §29 B02"],
-    "validation_status": "draft"
+    "source_refs": ["GDD v2.0 §29 B02"]
   }
 ]

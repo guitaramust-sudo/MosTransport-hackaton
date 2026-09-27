@@ -53,7 +53,6 @@ type Session struct {
 	Status            string      `json:"status"`
 	PendingSituations []string    `json:"pending_situations,omitempty"`
 	WagonState        *WagonState `json:"wagon_state,omitempty"`
-	ValidationStatus  string      `json:"validation_status"`
 	CreatedAt         time.Time   `json:"created_at"`
 	FinishedAt        *time.Time  `json:"finished_at"`
 }
@@ -112,9 +111,6 @@ type SituationOutcome struct {
 const (
 	ScenarioVersion    = "1.0.0"
 	ScoringRuleVersion = "points-v1"
-
-	ValidationDraft    = "draft"
-	ValidationApproved = "approved"
 
 	CompetencyInsufficient = "insufficient"
 	CompetencyProvisional  = "provisional"

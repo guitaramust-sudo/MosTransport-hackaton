@@ -92,9 +92,6 @@ func PickWagonSpawns(state domain.WagonState, cfg content.WagonClassConfig, leve
 	}
 	byType := map[string][]content.Scenario{}
 	for _, s := range scenarios {
-		if s.ValidationStatus == "blocked" {
-			continue
-		}
 		if level.TypeWeights[string(s.Type)] <= 0 {
 			continue
 		}

@@ -15,16 +15,18 @@ import (
 )
 
 var ErrUserNotFound = errors.New("user not found")
-var ErrUnapprovedContent = errors.New("session contains unapproved content")
 
 type AdminService struct {
-	store   repo.Store
-	catalog content.Catalog
-	levels  content.Levels
+	store      repo.Store
+	catalog    content.Catalog
+	levels     content.Levels
+	curriculum content.Curriculum
+	prize      *PrizeService
+	namespace  string
 }
 
-func NewAdminService(store repo.Store, catalog content.Catalog, levels content.Levels) *AdminService {
-	return &AdminService{store: store, catalog: catalog, levels: levels}
+func NewAdminService(store repo.Store, catalog content.Catalog, levels content.Levels, curriculum content.Curriculum, prize *PrizeService, namespace string) *AdminService {
+	return &AdminService{store: store, catalog: catalog, levels: levels, curriculum: curriculum, prize: prize, namespace: namespace}
 }
 
 // CreateExternalUserInput is the payload of POST /admin/users.
@@ -78,41 +80,37 @@ func (a *AdminService) CreatePlayerAccount(ctx context.Context, in CreatePlayerA
 	return player, nil
 }
 
-func (a *AdminService) ApproveSession(ctx context.Context, sessionID uuid.UUID) error {
-	sess, err := a.store.GetSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if sess.Status != domain.SessionStatusFinished {
-		return repo.ErrConflict
-	}
-	situations, err := a.store.ListSituationsBySession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	approved := map[string]bool{}
-	for _, scenario := range a.catalog.Scenarios {
-		approved[scenario.ID] = scenario.ValidationStatus == "approved"
-	}
-	if len(situations) == 0 {
-		return ErrUnapprovedContent
-	}
-	for _, sit := range situations {
-		if sit.SituationDefID == nil || !approved[*sit.SituationDefID] {
-			return ErrUnapprovedContent
-		}
-	}
-	return a.store.ApproveSession(ctx, sessionID)
+type LearningSummary struct {
+	Subject           LearningSubject               `json:"subject"`
+	TotalXP           int                           `json:"total_xp"`
+	PlayerLevel       int                           `json:"player_level"`
+	LeaderboardPoints int                           `json:"leaderboard_points"`
+	Achievements      []string                      `json:"achievements"`
+	TrainingScope     LearningTrainingScope         `json:"training_scope"`
+	SessionOutcomes   LearningSessionOutcomes       `json:"session_outcomes"`
+	Competencies      []domain.CompetencyAssessment `json:"competencies"`
+	WagonProgression  WagonProgressionSummary       `json:"wagon_progression"`
+	LessonProgression LessonProgressionSummary      `json:"lesson_progression"`
+	PrizeBalance      PrizeBalance                  `json:"prize_balance"`
+	Provenance        LearningProvenance            `json:"provenance"`
 }
 
-type LearningSummary struct {
-	DataStatus       string                        `json:"data_status"`
-	Subject          LearningSubject               `json:"subject"`
-	TrainingScope    LearningTrainingScope         `json:"training_scope"`
-	SessionOutcomes  LearningSessionOutcomes       `json:"session_outcomes"`
-	Competencies     []domain.CompetencyAssessment `json:"competencies"`
-	WagonProgression WagonProgressionSummary       `json:"wagon_progression"`
-	Provenance       LearningProvenance            `json:"provenance"`
+// LessonProgressionSummary is the admin-facing curriculum-lesson ladder view:
+// one entry per content-defined lesson (even never-attempted ones), mirroring
+// WagonProgressionSummary's "show everything" convention.
+type LessonProgressionSummary struct {
+	Lessons []LessonProgressionEntry `json:"lessons"`
+}
+
+type LessonProgressionEntry struct {
+	LessonID     string     `json:"lesson_id"`
+	Title        string     `json:"title"`
+	TheoryPass   bool       `json:"theory_pass"`
+	PracticePass bool       `json:"practice_pass"`
+	Completed    bool       `json:"completed"`
+	BadgeID      string     `json:"badge_id,omitempty"`
+	XPEarned     int        `json:"xp_earned"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 // WagonProgressionSummary is the §-adjacent wagon-mode ladder view: one entry
@@ -144,16 +142,15 @@ type LearningSubject struct {
 type LearningTrainingScope struct {
 	ClassIDs           []string   `json:"class_ids"`
 	MasteryStage       *string    `json:"mastery_stage"`
-	ValidationStatus   string     `json:"validation_status"`
 	ScenarioVersion    string     `json:"scenario_version"`
 	ScoringRuleVersion string     `json:"scoring_rule_version"`
 	AssessedAt         *time.Time `json:"assessed_at"`
 }
 
 type LearningSessionOutcomes struct {
-	ApprovedCompletedCount int                `json:"approved_completed_count"`
-	ApprovedPassedCount    int                `json:"approved_passed_count"`
-	RecentAssessments      []RecentAssessment `json:"recent_assessments"`
+	CompletedCount    int                `json:"completed_count"`
+	PassedCount       int                `json:"passed_count"`
+	RecentAssessments []RecentAssessment `json:"recent_assessments"`
 }
 
 type RecentAssessment struct {
@@ -171,11 +168,10 @@ type LearningProvenance struct {
 	AsOf               time.Time `json:"as_of"`
 	ScenarioVersion    string    `json:"scenario_version"`
 	ScoringRuleVersion string    `json:"scoring_rule_version"`
-	ExcludedDraftCount int       `json:"excluded_draft_count"`
 }
 
-// LearningSummary builds the §4.1 HR/learning read model for a user, counting
-// only approved sessions in the outcome aggregates.
+// LearningSummary builds the §4.1 HR/learning read model for a user,
+// counting every finished session in the outcome aggregates.
 func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*LearningSummary, error) {
 	player, err := a.store.GetPlayerByID(ctx, userID)
 	if err != nil {
@@ -190,21 +186,20 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		return nil, err
 	}
 
-	approvedCompleted, approvedPassed, excludedDraft := 0, 0, 0
+	completed, passed := 0, 0
 	recent := []RecentAssessment{}
 	var lastAssessed *time.Time
-	approvedCompetencies := map[string]repo.CompetencyAward{}
+	earnedCompetencies := map[string]repo.CompetencyAward{}
 	scenarioTypes := map[string]string{}
 	for _, scenario := range a.catalog.Scenarios {
 		scenarioTypes[scenario.ID] = string(scenario.Type)
 	}
 
 	for _, sess := range sessions {
-		if sess.ValidationStatus != domain.ValidationApproved || sess.Status != domain.SessionStatusFinished {
-			excludedDraft++
+		if sess.Status != domain.SessionStatusFinished {
 			continue
 		}
-		approvedCompleted++
+		completed++
 
 		situations, err := a.store.ListSituationsBySession(ctx, sess.ID)
 		if err != nil {
@@ -223,10 +218,10 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		for _, sit := range situations {
 			if sit.SituationDefID != nil {
 				if code := scenarioTypes[*sit.SituationDefID]; code != "" && sit.Outcome != nil && *sit.Outcome != "unfinished" {
-					award := approvedCompetencies[code]
+					award := earnedCompetencies[code]
 					award.XP += sit.XP
 					award.Evidence++
-					approvedCompetencies[code] = award
+					earnedCompetencies[code] = award
 				}
 			}
 			outcome := "unfinished"
@@ -250,7 +245,7 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 			ra.WorldSafetyCurrent = ra.SessionSafetyScore
 		}
 		if ra.SessionPass {
-			approvedPassed++
+			passed++
 		}
 		if sess.FinishedAt != nil && (lastAssessed == nil || sess.FinishedAt.After(*lastAssessed)) {
 			lastAssessed = sess.FinishedAt
@@ -264,7 +259,7 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 	}
 	var comps []domain.PlayerCompetency
 	for _, competency := range all {
-		if award, ok := approvedCompetencies[competency.Code]; ok {
+		if award, ok := earnedCompetencies[competency.Code]; ok {
 			comps = append(comps, domain.PlayerCompetency{CompetencyID: competency.ID, XP: award.XP, EvidenceCount: award.Evidence})
 		}
 	}
@@ -275,17 +270,30 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 		return nil, err
 	}
 
-	validation := domain.ValidationDraft
-	if approvedCompleted > 0 {
-		validation = domain.ValidationApproved
+	lessonProgression, err := a.lessonProgression(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 
-	dataStatus := "no_approved_data"
-	if approvedCompleted > 0 {
-		dataStatus = "available"
+	achievements, err := a.store.ListAchievementCodes(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
+
+	leaderboardPoints, err := a.store.GetPlayerPointsTotal(ctx, userID, a.namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var prizeBalance PrizeBalance
+	if a.prize != nil {
+		prizeBalance, err = a.prize.Balance(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &LearningSummary{
-		DataStatus: dataStatus,
 		Subject: LearningSubject{
 			UserID:           player.ID,
 			SourceSystem:     player.SourceSystem,
@@ -293,27 +301,78 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 			AssignedClassIDs: player.AssignedClassIDs,
 			DisplayName:      player.DisplayName,
 		},
+		TotalXP:           player.TotalXP,
+		PlayerLevel:       levelForXP(player.TotalXP),
+		LeaderboardPoints: leaderboardPoints,
+		Achievements:      achievements,
 		TrainingScope: LearningTrainingScope{
 			ClassIDs:           player.AssignedClassIDs,
-			ValidationStatus:   validation,
 			ScenarioVersion:    domain.ScenarioVersion,
 			ScoringRuleVersion: domain.ScoringRuleVersion,
 			AssessedAt:         lastAssessed,
 		},
 		SessionOutcomes: LearningSessionOutcomes{
-			ApprovedCompletedCount: approvedCompleted,
-			ApprovedPassedCount:    approvedPassed,
-			RecentAssessments:      recent,
+			CompletedCount:    completed,
+			PassedCount:       passed,
+			RecentAssessments: recent,
 		},
-		Competencies:     assessments,
-		WagonProgression: wagonProgression,
+		Competencies:      assessments,
+		WagonProgression:  wagonProgression,
+		LessonProgression: lessonProgression,
+		PrizeBalance:      prizeBalance,
 		Provenance: LearningProvenance{
 			AsOf:               time.Now(),
 			ScenarioVersion:    domain.ScenarioVersion,
 			ScoringRuleVersion: domain.ScoringRuleVersion,
-			ExcludedDraftCount: excludedDraft,
 		},
 	}, nil
+}
+
+// lessonProgression builds the per-lesson curriculum progress view for a
+// player, in curriculum order, including lessons the player has never
+// touched. XPEarned/BadgeID come from the matching lesson_awards row (the
+// "completion" award) when one exists, zero-value/empty otherwise.
+func (a *AdminService) lessonProgression(ctx context.Context, playerID uuid.UUID) (LessonProgressionSummary, error) {
+	progressRows, err := a.store.ListLessonProgressByPlayer(ctx, playerID)
+	if err != nil {
+		return LessonProgressionSummary{}, err
+	}
+	progressByLesson := map[string]domain.LessonProgress{}
+	for _, p := range progressRows {
+		progressByLesson[p.LessonID] = p
+	}
+
+	awardRows, err := a.store.ListLessonAwardsByPlayer(ctx, playerID)
+	if err != nil {
+		return LessonProgressionSummary{}, err
+	}
+	awardByLesson := map[string]domain.LessonAward{}
+	for _, aw := range awardRows {
+		if aw.AwardType == "completion" {
+			awardByLesson[aw.LessonID] = aw
+		}
+	}
+
+	entries := make([]LessonProgressionEntry, 0, len(a.curriculum.Lessons))
+	for _, lesson := range a.curriculum.Lessons {
+		entry := LessonProgressionEntry{
+			LessonID: lesson.LessonID,
+			Title:    lesson.Title,
+		}
+		if p, ok := progressByLesson[lesson.LessonID]; ok {
+			entry.TheoryPass = p.TheoryPass
+			entry.PracticePass = p.PracticePass
+			entry.Completed = p.CompletedAt != nil
+			entry.CompletedAt = p.CompletedAt
+		}
+		if award, ok := awardByLesson[lesson.LessonID]; ok {
+			entry.XPEarned = award.XPDelta
+			entry.BadgeID = award.BadgeID
+		}
+		entries = append(entries, entry)
+	}
+
+	return LessonProgressionSummary{Lessons: entries}, nil
 }
 
 // wagonProgression builds the per-level wagon-mode attempt history for a

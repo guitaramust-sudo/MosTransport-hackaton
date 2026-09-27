@@ -13,10 +13,10 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
-const sessionColumns = `id, player_id, status, pending_situations, validation_status, created_at, finished_at, wagon_state`
+const sessionColumns = `id, player_id, status, pending_situations, created_at, finished_at, wagon_state`
 
 func scanSession(sess *domain.Session) []any {
-	return []any{&sess.ID, &sess.PlayerID, &sess.Status, &sess.PendingSituations, &sess.ValidationStatus, &sess.CreatedAt, &sess.FinishedAt, &sess.WagonState}
+	return []any{&sess.ID, &sess.PlayerID, &sess.Status, &sess.PendingSituations, &sess.CreatedAt, &sess.FinishedAt, &sess.WagonState}
 }
 
 func (s *Store) CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error) {
@@ -154,25 +154,6 @@ func (s *Store) FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID
 		return false, err
 	}
 	return true, nil
-}
-
-func (s *Store) ApproveSession(ctx context.Context, id uuid.UUID) error {
-	var approvedID uuid.UUID
-	err := s.pool.QueryRow(ctx,
-		`UPDATE sessions SET validation_status = 'approved'
-		 WHERE id = $1 AND status = 'finished' RETURNING id`, id).Scan(&approvedID)
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	var status string
-	err = s.pool.QueryRow(ctx, `SELECT status FROM sessions WHERE id = $1`, id).Scan(&status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return repo.ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	return repo.ErrConflict
 }
 
 func (s *Store) ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error) {

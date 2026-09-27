@@ -41,9 +41,7 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 		if scenario.PhysicalRequirement != nil {
 			continue
 		}
-		if scenario.ValidationStatus == "approved" || (s.pointsNamespace == "demo" && scenario.ValidationStatus == "draft") {
-			pool = append(pool, scenario)
-		}
+		pool = append(pool, scenario)
 	}
 	if len(pool) == 0 {
 		return nil, nil, ErrNoEligibleScenarios
@@ -75,18 +73,17 @@ func buildSituationDraft(scenario content.Scenario, passenger content.Passenger)
 	deadline := time.Now().Add(time.Duration(scenario.TimeLimitSec) * time.Second)
 	scenarioID, passengerID := scenario.ID, passenger.ID
 	params := map[string]any{
-		"code":                      scenario.ID,
-		"name":                      passenger.ID,
-		"persona":                   passenger.PromptHint,
-		"scenario":                  scenario.Title,
-		"content_validation_status": scenario.ValidationStatus,
-		"opening":                   scenario.Opening,
-		"situation_def_id":          scenario.ID,
-		"passenger_id":              passenger.ID,
-		"prompt_hint":               passenger.PromptHint,
-		"language":                  passenger.Language,
-		"traits":                    passenger.Traits,
-		"traits_text":               strings.Join(passenger.Traits, ", "),
+		"code":             scenario.ID,
+		"name":             passenger.ID,
+		"persona":          passenger.PromptHint,
+		"scenario":         scenario.Title,
+		"opening":          scenario.Opening,
+		"situation_def_id": scenario.ID,
+		"passenger_id":     passenger.ID,
+		"prompt_hint":      passenger.PromptHint,
+		"language":         passenger.Language,
+		"traits":           passenger.Traits,
+		"traits_text":      strings.Join(passenger.Traits, ", "),
 	}
 	return domain.Situation{
 		Status:          domain.SituationStatusActive,
@@ -134,7 +131,6 @@ type Breakdown struct {
 	SessionID              uuid.UUID            `json:"session_id"`
 	ScenarioVersion        string               `json:"scenario_version"`
 	ScoringRuleVersion     string               `json:"scoring_rule_version"`
-	ValidationStatus       string               `json:"validation_status"`
 	PointsNamespace        string               `json:"points_namespace"`
 	TotalXP                int                  `json:"total_xp"`
 	SessionPass            bool                 `json:"session_pass"`
@@ -214,7 +210,6 @@ func (s *SessionService) finishOnce(ctx context.Context, playerID, sessionID uui
 		SessionID:          sessionID,
 		ScenarioVersion:    domain.ScenarioVersion,
 		ScoringRuleVersion: domain.ScoringRuleVersion,
-		ValidationStatus:   sess.ValidationStatus,
 		PointsNamespace:    s.pointsNamespace,
 		Competencies:       map[string]int{},
 	}

@@ -93,12 +93,6 @@ func run() error {
 	situations := service.NewSituationService(store, client, catalog)
 	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace, client)
 	wagonCatalog := catalog
-	wagonCatalog.Scenarios = nil
-	for _, scenario := range catalog.Scenarios {
-		if scenario.ValidationStatus == "approved" || (cfg.PointsNamespace == "demo" && scenario.ValidationStatus == "draft") {
-			wagonCatalog.Scenarios = append(wagonCatalog.Scenarios, scenario)
-		}
-	}
 	wagonManager := service.NewWagonManager(store, wagonCatalog, wagonLevels)
 	defer wagonManager.StopAll()
 	if err := wagonManager.Recover(ctx, wagonClasses); err != nil {
@@ -119,7 +113,7 @@ func run() error {
 		Profile:      service.NewProfileService(store, cfg.PointsNamespace),
 		Session:      service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation:    situations,
-		Admin:        service.NewAdminService(store, catalog, wagonLevels),
+		Admin:        service.NewAdminService(store, catalog, wagonLevels, curriculum, prizeService, cfg.PointsNamespace),
 		Simulation:   simulationService,
 		Wagon:        wagonService,
 		WagonManager: wagonManager,
@@ -248,7 +242,6 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/users", h.CreateExternalUser)
 		r.Post("/players", h.CreatePlayerAccount)
 		r.Get("/users/{id}/learning-summary", h.LearningSummary)
-		r.Post("/sessions/{id}/approve", h.ApproveSession)
 		r.Post("/users/{id}/prize-credits/demo-seed", h.SeedDemoPrizeEntry)
 	})
 	return r

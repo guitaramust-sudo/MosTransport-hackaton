@@ -136,9 +136,9 @@ func minimalFixture() (chaptersRaw, lessonsRaw, questionsRaw []byte, catalog Cat
 	if err != nil {
 		return
 	}
-	chaptersRaw = []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":["l1"],"scope":"class","class_id":"first","content_version":"1.0.0","validation_status":"draft"}]`)
-	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["q1"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q2"],"completion_rule":"visit_inspect","debrief_intro":"d","validation_status":"draft"}]`)
-	questionsRaw = []byte(`[{"question_id":"q1","phase":"theory","type":"single_choice","prompt":"p1","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a","validation_status":"draft"},{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a","validation_status":"draft"}]`)
+	chaptersRaw = []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":["l1"],"scope":"class","class_id":"first","content_version":"1.0.0"}]`)
+	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["q1"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q2"],"completion_rule":"visit_inspect","debrief_intro":"d"}]`)
+	questionsRaw = []byte(`[{"question_id":"q1","phase":"theory","type":"single_choice","prompt":"p1","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a"},{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a"}]`)
 	return
 }
 
@@ -157,8 +157,8 @@ func TestParseCurriculumRejectsUnknownQuestionReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["missing"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q2"],"completion_rule":"visit_inspect","debrief_intro":"d","validation_status":"draft"}]`)
-	questionsRaw := []byte(`[{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a","validation_status":"draft"}]`)
+	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["missing"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q2"],"completion_rule":"visit_inspect","debrief_intro":"d"}]`)
+	questionsRaw := []byte(`[{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a"}]`)
 	if _, err := ParseCurriculum(chaptersRaw, lessonsRaw, questionsRaw, catalog, classes); err == nil {
 		t.Fatal("expected an error for an unknown question reference")
 	}
@@ -170,7 +170,7 @@ func TestParseCurriculumRejectsPhaseMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// q2 is phase practice but referenced under theory_question_ids.
-	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["q2"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q1"],"completion_rule":"visit_inspect","debrief_intro":"d","validation_status":"draft"}]`)
+	lessonsRaw = []byte(`[{"lesson_id":"l1","chapter_id":"c1","order":1,"title":"L1","badge_id":"b1","estimated_min":5,"theory_cards":["x"],"theory_question_ids":["q2"],"required_anchor_ids":["sanitary_zone"],"required_object_ids":["o1"],"practice_question_ids":["q1"],"completion_rule":"visit_inspect","debrief_intro":"d"}]`)
 	if _, err := ParseCurriculum(chaptersRaw, lessonsRaw, questionsRaw, catalog, classes); err == nil {
 		t.Fatal("expected an error for a phase mismatch")
 	}
@@ -181,7 +181,7 @@ func TestParseCurriculumRejectsBadCorrectOptionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	questionsRaw := []byte(`[{"question_id":"q1","phase":"theory","type":"single_choice","prompt":"p1","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"zzz","validation_status":"draft"},{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a","validation_status":"draft"}]`)
+	questionsRaw := []byte(`[{"question_id":"q1","phase":"theory","type":"single_choice","prompt":"p1","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"zzz"},{"question_id":"q2","phase":"practice","type":"single_choice","prompt":"p2","options":[{"option_id":"a","text":"A"},{"option_id":"b","text":"B"}],"correct_option_id":"a"}]`)
 	if _, err := ParseCurriculum(chaptersRaw, lessonsRaw, questionsRaw, catalog, classes); err == nil {
 		t.Fatal("expected an error for a correct_option_id with no matching option")
 	}
@@ -193,13 +193,13 @@ func TestParseCurriculumRejectsOrphanChapterLessonLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("chapter lists unknown lesson", func(t *testing.T) {
-		chaptersRaw := []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":["l1","ghost"],"scope":"class","class_id":"first","content_version":"1.0.0","validation_status":"draft"}]`)
+		chaptersRaw := []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":["l1","ghost"],"scope":"class","class_id":"first","content_version":"1.0.0"}]`)
 		if _, err := ParseCurriculum(chaptersRaw, lessonsRaw, questionsRaw, catalog, classes); err == nil {
 			t.Fatal("expected an error for a chapter listing a nonexistent lesson_id")
 		}
 	})
 	t.Run("lesson not wired into its chapter", func(t *testing.T) {
-		chaptersRaw := []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":[],"scope":"class","class_id":"first","content_version":"1.0.0","validation_status":"draft"}]`)
+		chaptersRaw := []byte(`[{"chapter_id":"c1","order":1,"title":"C1","lesson_ids":[],"scope":"class","class_id":"first","content_version":"1.0.0"}]`)
 		if _, err := ParseCurriculum(chaptersRaw, lessonsRaw, questionsRaw, catalog, classes); err == nil {
 			t.Fatal("expected an error for a lesson whose chapter doesn't list it")
 		}
