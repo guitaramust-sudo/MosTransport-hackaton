@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mostransport/vsm-trainer/internal/content"
 	"github.com/mostransport/vsm-trainer/internal/domain"
@@ -18,10 +20,11 @@ var ErrUnapprovedContent = errors.New("session contains unapproved content")
 type AdminService struct {
 	store   repo.Store
 	catalog content.Catalog
+	levels  content.Levels
 }
 
-func NewAdminService(store repo.Store, catalog content.Catalog) *AdminService {
-	return &AdminService{store: store, catalog: catalog}
+func NewAdminService(store repo.Store, catalog content.Catalog, levels content.Levels) *AdminService {
+	return &AdminService{store: store, catalog: catalog, levels: levels}
 }
 
 // CreateExternalUserInput is the payload of POST /admin/users.
@@ -42,6 +45,37 @@ func (a *AdminService) CreateExternalUser(ctx context.Context, in CreateExternal
 		return domain.Player{}, false, errors.New("source_system and external_user_id are required")
 	}
 	return a.store.UpsertExternalUser(ctx, in.SourceSystem, in.ExternalUserID, in.DisplayName, in.DepotID, in.BrigadeID, in.AssignedClassIDs)
+}
+
+// CreatePlayerAccountInput is the payload of POST /admin/players.
+type CreatePlayerAccountInput struct {
+	Email       string `json:"email"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	BrigadeName string `json:"brigade_name"`
+}
+
+// CreatePlayerAccount creates a normal, password-login player account on an
+// admin's behalf — the only way to get a new account now that public
+// self-registration is disabled. It does not issue tokens: the new player
+// logs in themselves via POST /auth/login.
+func (a *AdminService) CreatePlayerAccount(ctx context.Context, in CreatePlayerAccountInput) (domain.Player, error) {
+	if in.Email == "" || in.Username == "" || len(in.Password) < 6 || in.BrigadeName == "" {
+		return domain.Player{}, errors.New("email, username, password (min 6 chars) and brigade_name are required")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return domain.Player{}, err
+	}
+	brigade := in.BrigadeName
+	player, err := a.store.CreatePlayerWithBrigade(ctx, in.Email, in.Username, string(hash), &brigade)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return domain.Player{}, ErrEmailTaken
+		}
+		return domain.Player{}, err
+	}
+	return player, nil
 }
 
 func (a *AdminService) ApproveSession(ctx context.Context, sessionID uuid.UUID) error {
@@ -72,12 +106,31 @@ func (a *AdminService) ApproveSession(ctx context.Context, sessionID uuid.UUID) 
 }
 
 type LearningSummary struct {
-	DataStatus      string                        `json:"data_status"`
-	Subject         LearningSubject               `json:"subject"`
-	TrainingScope   LearningTrainingScope         `json:"training_scope"`
-	SessionOutcomes LearningSessionOutcomes       `json:"session_outcomes"`
-	Competencies    []domain.CompetencyAssessment `json:"competencies"`
-	Provenance      LearningProvenance            `json:"provenance"`
+	DataStatus       string                        `json:"data_status"`
+	Subject          LearningSubject               `json:"subject"`
+	TrainingScope    LearningTrainingScope         `json:"training_scope"`
+	SessionOutcomes  LearningSessionOutcomes       `json:"session_outcomes"`
+	Competencies     []domain.CompetencyAssessment `json:"competencies"`
+	WagonProgression WagonProgressionSummary       `json:"wagon_progression"`
+	Provenance       LearningProvenance            `json:"provenance"`
+}
+
+// WagonProgressionSummary is the §-adjacent wagon-mode ladder view: one entry
+// per content-defined level (even never-attempted ones), plus the player's
+// current unlocked progress.
+type WagonProgressionSummary struct {
+	CurrentProgress int                 `json:"current_progress"` // highest Level.Order fully passed
+	Levels          []WagonLevelHistory `json:"levels"`
+}
+
+type WagonLevelHistory struct {
+	LevelID       string     `json:"level_id"`
+	Order         int        `json:"order"`
+	Title         string     `json:"title"`
+	Status        string     `json:"status"` // "locked" | "unlocked" | "passed"
+	Attempts      int        `json:"attempts"`
+	Passed        bool       `json:"passed"`
+	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
 }
 
 type LearningSubject struct {
@@ -217,6 +270,11 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 	}
 	assessments := assessCompetencies(all, comps)
 
+	wagonProgression, err := a.wagonProgression(ctx, player, sessions)
+	if err != nil {
+		return nil, err
+	}
+
 	validation := domain.ValidationDraft
 	if approvedCompleted > 0 {
 		validation = domain.ValidationApproved
@@ -247,7 +305,8 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 			ApprovedPassedCount:    approvedPassed,
 			RecentAssessments:      recent,
 		},
-		Competencies: assessments,
+		Competencies:     assessments,
+		WagonProgression: wagonProgression,
 		Provenance: LearningProvenance{
 			AsOf:               time.Now(),
 			ScenarioVersion:    domain.ScenarioVersion,
@@ -255,4 +314,77 @@ func (a *AdminService) LearningSummary(ctx context.Context, userID uuid.UUID) (*
 			ExcludedDraftCount: excludedDraft,
 		},
 	}, nil
+}
+
+// wagonProgression builds the per-level wagon-mode attempt history for a
+// player, in Level.Order, including levels the player has never attempted.
+// Only finished wagon sessions count as attempts (an in-progress session
+// isn't a completed attempt yet). Pass/fail for an attempt follows the same
+// rule as WagonService.AdvanceIfPassed: passed iff no situation in the
+// session resolved with outcome "fail".
+func (a *AdminService) wagonProgression(ctx context.Context, player domain.Player, sessions []domain.Session) (WagonProgressionSummary, error) {
+	type levelAgg struct {
+		attempts      int
+		passed        bool
+		lastAttemptAt *time.Time
+	}
+	byLevel := map[string]*levelAgg{}
+
+	for _, sess := range sessions {
+		if sess.WagonState == nil || sess.WagonState.LevelID == "" {
+			continue
+		}
+		if sess.Status != domain.SessionStatusFinished {
+			continue
+		}
+		situations, err := a.store.ListSituationsBySession(ctx, sess.ID)
+		if err != nil {
+			return WagonProgressionSummary{}, err
+		}
+		passed := true
+		for _, sit := range situations {
+			if sit.Outcome != nil && *sit.Outcome == "fail" {
+				passed = false
+				break
+			}
+		}
+		agg := byLevel[sess.WagonState.LevelID]
+		if agg == nil {
+			agg = &levelAgg{}
+			byLevel[sess.WagonState.LevelID] = agg
+		}
+		agg.attempts++
+		if passed {
+			agg.passed = true
+		}
+		if sess.FinishedAt != nil && (agg.lastAttemptAt == nil || sess.FinishedAt.After(*agg.lastAttemptAt)) {
+			agg.lastAttemptAt = sess.FinishedAt
+		}
+	}
+
+	levels := make([]WagonLevelHistory, 0, len(a.levels))
+	for _, lvl := range a.levels {
+		status := "locked"
+		switch {
+		case lvl.Order <= player.WagonProgress:
+			status = "passed"
+		case lvl.Order == player.WagonProgress+1:
+			status = "unlocked"
+		}
+		history := WagonLevelHistory{
+			LevelID: lvl.ID,
+			Order:   lvl.Order,
+			Title:   lvl.Title,
+			Status:  status,
+		}
+		if agg := byLevel[lvl.ID]; agg != nil {
+			history.Attempts = agg.attempts
+			history.Passed = agg.passed
+			history.LastAttemptAt = agg.lastAttemptAt
+		}
+		levels = append(levels, history)
+	}
+	sort.Slice(levels, func(i, j int) bool { return levels[i].Order < levels[j].Order })
+
+	return WagonProgressionSummary{CurrentProgress: player.WagonProgress, Levels: levels}, nil
 }

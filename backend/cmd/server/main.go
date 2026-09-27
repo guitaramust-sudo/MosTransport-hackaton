@@ -97,7 +97,7 @@ func run() error {
 		Profile:      service.NewProfileService(store, cfg.PointsNamespace),
 		Session:      service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
 		Situation:    situations,
-		Admin:        service.NewAdminService(store, catalog),
+		Admin:        service.NewAdminService(store, catalog, wagonLevels),
 		Simulation:   simulationService,
 		Wagon:        wagonService,
 		WagonManager: wagonManager,
@@ -165,7 +165,6 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 	})
 	r.Route("/auth", func(r chi.Router) {
 		r.Use(appmiddleware.AuthRateLimit(10, time.Minute))
-		r.Post("/register", h.Register)
 		r.Post("/login", h.Login)
 		r.Post("/refresh", h.Refresh)
 	})
@@ -196,6 +195,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(appmiddleware.AdminAuth(auth))
 		r.Post("/users", h.CreateExternalUser)
+		r.Post("/players", h.CreatePlayerAccount)
 		r.Get("/users/{id}/learning-summary", h.LearningSummary)
 		r.Post("/sessions/{id}/approve", h.ApproveSession)
 	})

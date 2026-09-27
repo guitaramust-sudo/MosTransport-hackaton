@@ -55,6 +55,7 @@ type LockedSituation interface {
 type Store interface {
 	// Players
 	CreatePlayer(ctx context.Context, email, username, passwordHash string) (domain.Player, error)
+	CreatePlayerWithBrigade(ctx context.Context, email, username, passwordHash string, brigadeID *string) (domain.Player, error)
 	GetPlayerByEmail(ctx context.Context, email string) (domain.Player, error)
 	GetPlayerByID(ctx context.Context, id uuid.UUID) (domain.Player, error)
 	AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) error

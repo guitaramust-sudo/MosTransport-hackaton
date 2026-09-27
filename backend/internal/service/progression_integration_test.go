@@ -146,6 +146,97 @@ func TestPointsLeaderboardUsesFullCohort(t *testing.T) {
 	}
 }
 
+// TestLeaderboardPercentileMatchesScopedLeaderboard checks that the plain,
+// unscoped Leaderboard reports a sane, non-zero Percentile for a multi-player
+// cohort (top scorer high, bottom scorer low), and that it agrees exactly
+// with ScopedLeaderboard's "company" scope for the same player, since
+// Leaderboard is just that scope's unscoped case.
+func TestLeaderboardPercentileMatchesScopedLeaderboard(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+	ctx := context.Background()
+	store, err := postgres.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ids := make([]uuid.UUID, 0, 5)
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), url)
+		if err == nil {
+			_, _ = conn.Exec(context.Background(), `DELETE FROM players WHERE id = ANY($1)`, ids)
+			_ = conn.Close(context.Background())
+		}
+	})
+	ns := fmt.Sprintf("pct-test-%s", uuid.NewString())
+	simTemplate, err := simulation.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSimulationService(store, simTemplate, ns)
+	players := make([]uuid.UUID, 0, 5)
+	for i := 0; i < 5; i++ {
+		player, err := store.CreatePlayer(ctx, fmt.Sprintf("pct-%s@example.invalid", uuid.NewString()), fmt.Sprintf("pct-%d", i), "unused")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, player.ID)
+		players = append(players, player.ID)
+	}
+	// Give the top player points; leave the rest at zero so there's a clear
+	// top and bottom of the cohort.
+	if _, _, err := completeCleanSimulationRun(t, ctx, svc, players[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	profileSvc := NewProfileService(store, ns)
+	plain, err := profileSvc.Leaderboard(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := profileSvc.ScopedLeaderboard(ctx, "company", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopedByPlayer := map[uuid.UUID]float64{}
+	for _, e := range scoped.Entries {
+		scopedByPlayer[e.PlayerID] = e.Percentile
+	}
+	var topPercentile, bottomPercentile float64
+	matched := 0
+	for _, e := range plain {
+		if e.PlayerID == players[0] {
+			topPercentile = e.Percentile
+		} else {
+			bottomPercentile = e.Percentile
+		}
+		if want, ok := scopedByPlayer[e.PlayerID]; ok {
+			matched++
+			if want != e.Percentile {
+				t.Fatalf("percentile mismatch for player %s: plain=%v scoped=%v", e.PlayerID, e.Percentile, want)
+			}
+		}
+	}
+	if matched == 0 {
+		t.Fatalf("no players matched between plain and scoped leaderboards")
+	}
+	if topPercentile <= 50 {
+		t.Fatalf("top scorer percentile too low: %v", topPercentile)
+	}
+	if bottomPercentile >= topPercentile {
+		t.Fatalf("bottom scorer percentile (%v) not below top scorer (%v)", bottomPercentile, topPercentile)
+	}
+}
+
+func completeCleanSimulationRun(t *testing.T, ctx context.Context, svc *SimulationService, playerID uuid.UUID) (uuid.UUID, string, error) {
+	t.Helper()
+	id, variant := completeCleanSimulation(t, ctx, svc, playerID)
+	_, err := svc.Result(ctx, playerID, id)
+	return id, variant, err
+}
+
 func completeCleanSimulation(t *testing.T, ctx context.Context, svc *SimulationService, playerID uuid.UUID) (uuid.UUID, string) {
 	t.Helper()
 	view, err := svc.Start(ctx, playerID)

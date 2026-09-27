@@ -31,6 +31,24 @@ func (h *Handlers) CreateExternalUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handlers) CreatePlayerAccount(w http.ResponseWriter, r *http.Request) {
+	var req service.CreatePlayerAccountInput
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	player, err := h.Admin.CreatePlayerAccount(r.Context(), req)
+	if err != nil {
+		if errors.Is(err, service.ErrEmailTaken) {
+			writeError(w, http.StatusConflict, "email already registered")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"player": player})
+}
+
 func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {

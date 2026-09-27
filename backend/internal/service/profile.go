@@ -110,6 +110,7 @@ type LeaderboardEntry struct {
 	PlayerID               uuid.UUID `json:"player_id"`
 	Username               string    `json:"username"`
 	LeaderboardPointsTotal int       `json:"leaderboard_points_total"`
+	Percentile             float64   `json:"percentile"`
 }
 
 func (s *ProfileService) Leaderboard(ctx context.Context, limit int) ([]LeaderboardEntry, error) {
@@ -130,6 +131,7 @@ func (s *ProfileService) Leaderboard(ctx context.Context, limit int) ([]Leaderbo
 			PlayerID:               p.PlayerID,
 			Username:               p.Username,
 			LeaderboardPointsTotal: p.Points,
+			Percentile:             percentileOf(players, i),
 		})
 	}
 	return out, nil
@@ -167,27 +169,35 @@ func (s *ProfileService) ScopedLeaderboard(ctx context.Context, scope, groupID s
 		if i >= limit {
 			break
 		}
-		rank := pointsRank(players, i)
-		percentile := 0.0
-		if groupSize > 0 {
-			equal := 0
-			for _, row := range players {
-				if row.Points == p.Points {
-					equal++
-				}
-			}
-			lower := groupSize - (rank - 1) - equal
-			percentile = math.Round((float64(lower)+0.5*float64(equal))/float64(groupSize)*10000) / 100
-		}
 		entries = append(entries, ScopedLeaderboardEntry{
-			Rank:                   rank,
+			Rank:                   pointsRank(players, i),
 			PlayerID:               p.PlayerID,
 			Username:               p.Username,
 			LeaderboardPointsTotal: p.Points,
-			Percentile:             percentile,
+			Percentile:             percentileOf(players, i),
 		})
 	}
 	return &ScopedLeaderboard{GroupScope: scope, GroupID: groupID, GroupSize: groupSize, Entries: entries}, nil
+}
+
+// percentileOf computes the percentile rank of the entry at index in a
+// list already sorted by points descending: the share of the cohort
+// scoring at or below this entry's points, with ties split evenly.
+func percentileOf(players []repo.PointsStanding, index int) float64 {
+	groupSize := len(players)
+	if groupSize == 0 {
+		return 0
+	}
+	rank := pointsRank(players, index)
+	points := players[index].Points
+	equal := 0
+	for _, row := range players {
+		if row.Points == points {
+			equal++
+		}
+	}
+	lower := groupSize - (rank - 1) - equal
+	return math.Round((float64(lower)+0.5*float64(equal))/float64(groupSize)*10000) / 100
 }
 
 func pointsRank(players []repo.PointsStanding, index int) int {

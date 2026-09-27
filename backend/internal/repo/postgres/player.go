@@ -32,6 +32,18 @@ func (s *Store) CreatePlayer(ctx context.Context, email, username, passwordHash 
 	return p, err
 }
 
+// CreatePlayerWithBrigade creates a player and sets brigade_id (the
+// brigade's plain-text name/label) at creation time, for admin-created
+// accounts.
+func (s *Store) CreatePlayerWithBrigade(ctx context.Context, email, username, passwordHash string, brigadeID *string) (domain.Player, error) {
+	var p domain.Player
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO players (email, username, password_hash, brigade_id) VALUES ($1, $2, $3, $4) RETURNING `+playerColumns,
+		email, username, passwordHash, brigadeID,
+	).Scan(scanPlayer(&p)...)
+	return p, err
+}
+
 func (s *Store) GetPlayerByEmail(ctx context.Context, email string) (domain.Player, error) {
 	return s.scanPlayer(ctx, `SELECT `+playerColumns+` FROM players WHERE email = $1`, email)
 }
