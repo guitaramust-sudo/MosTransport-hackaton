@@ -4,19 +4,17 @@ import { api } from '../api/client'
 import { navigate, setWagonSession, useAppDispatch, useAppSelector } from '../app/store'
 import { Text } from '../components/Typography'
 import { colors, radius, shadow } from '../helpers/theme'
-import type { WagonClassId } from '../types'
 
-const classes: Array<{ id: WagonClassId; name: string; description: string; badge: string }> = [
-  { id: 'standard', name: 'Стандарт', description: '6 пассажиров · 8 минут · до 3 ситуаций', badge: 'ДОСТУПНО' },
-  { id: 'comfort', name: 'Комфорт', description: 'Повышенные требования к сервису', badge: 'СКОРО' },
-  { id: 'business', name: 'Бизнес', description: 'Персональное обслуживание пассажиров', badge: 'СКОРО' },
-  { id: 'first', name: 'Первый класс', description: 'Максимальный уровень сложности', badge: 'СКОРО' },
+const futureClasses = [
+  { id: 'comfort', name: 'Комфорт', description: 'Повышенные требования к сервису' },
+  { id: 'business', name: 'Бизнес', description: 'Персональное обслуживание пассажиров' },
+  { id: 'first', name: 'Первый класс', description: 'Максимальный уровень сложности' },
 ]
 
 export function WagonLobbyPage() {
   const dispatch = useAppDispatch()
   const savedSessionId = useAppSelector((state) => state.app.wagonSessionId)
-  const status = useQuery({ queryKey: ['wagon-classes'], queryFn: api.getWagonClasses })
+  const levels = useQuery({ queryKey: ['wagon-levels'], queryFn: api.getWagonLevels })
   const start = useMutation({
     mutationFn: api.startWagonSession,
     onSuccess: (result) => dispatch(setWagonSession({ sessionId: result.session_id, wsPath: result.ws_path })),
@@ -26,13 +24,13 @@ export function WagonLobbyPage() {
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Pressable onPress={() => dispatch(navigate('home'))} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable>
-        <View><Text style={styles.kicker}>ТРЕНАЖЁР ВСМ</Text><Text style={styles.title}>Выберите вагон</Text></View>
+        <View><Text style={styles.kicker}>ТРЕНАЖЁР ВСМ</Text><Text style={styles.title}>Выберите уровень</Text></View>
       </View>
       <View style={styles.hero}>
         <View style={styles.heroLine} /><View style={[styles.heroLine, styles.heroLineRed]} />
         <Text style={styles.heroMark}>ВСМ</Text>
         <Text style={styles.heroTitle}>Смена начинается</Text>
-        <Text style={styles.heroText}>Перемещайтесь по вагону, замечайте сигналы пассажиров и действуйте по стандартам сервиса.</Text>
+        <Text style={styles.heroText}>Проходите смены по порядку: от знакомства с вагоном до сложных ситуаций.</Text>
       </View>
       {savedSessionId && (
         <Pressable onPress={() => dispatch(navigate('wagon'))} style={styles.resume}>
@@ -40,17 +38,23 @@ export function WagonLobbyPage() {
           <Text style={styles.resumeArrow}>→</Text>
         </Pressable>
       )}
-      <Text style={styles.sectionTitle}>Класс обслуживания</Text>
-      {classes.map((item, index) => {
-        const available = (status.data?.classes[item.id] ?? (item.id === 'standard' ? 'available' : 'coming_soon')) === 'available'
+      <Text style={styles.sectionTitle}>Уровни · Стандарт</Text>
+      {levels.isPending && <Text style={styles.classDescription}>Загружаем уровни…</Text>}
+      {levels.data?.levels.map((item) => {
+        const available = item.status !== 'locked'
+        const badge = item.status === 'passed' ? 'ПРОЙДЕНО' : available ? 'ОТКРЫТО' : 'ЗАКРЫТО'
         return (
-          <Pressable key={item.id} disabled={!available || start.isPending} onPress={() => start.mutate(item.id)} style={[styles.classCard, index === 0 && styles.classCardPrimary, !available && styles.locked]}>
-            <View style={[styles.number, index === 0 && styles.numberPrimary]}><Text style={[styles.numberText, index === 0 && styles.numberTextPrimary]}>{index + 1}</Text></View>
-            <View style={styles.classBody}><View style={styles.classRow}><Text style={styles.className}>{item.name}</Text><Text style={[styles.badge, available && styles.badgeAvailable]}>{available ? (start.isPending ? 'ЗАПУСК…' : item.badge) : 'СКОРО'}</Text></View><Text style={styles.classDescription}>{item.description}</Text></View>
+          <Pressable key={item.id} disabled={!available || start.isPending} onPress={() => start.mutate(item.id)} style={[styles.classCard, available && styles.classCardPrimary, !available && styles.locked]}>
+            <View style={[styles.number, available && styles.numberPrimary]}><Text style={[styles.numberText, available && styles.numberTextPrimary]}>{item.order}</Text></View>
+            <View style={styles.classBody}><View style={styles.classRow}><Text style={styles.className}>{item.title}</Text><Text style={[styles.badge, available && styles.badgeAvailable]}>{start.isPending && start.variables === item.id ? 'ЗАПУСК…' : badge}</Text></View><Text style={styles.classDescription}>{item.intro ?? 'Завершите предыдущий уровень, чтобы открыть этот.'}</Text></View>
           </Pressable>
         )
       })}
-      {(status.error || start.error) && <Text style={styles.error}>{(status.error ?? start.error)?.message ?? 'Не удалось открыть вагон'}</Text>}
+      <Text style={styles.sectionTitle}>Другие классы · скоро</Text>
+      {futureClasses.map((item) => <View key={item.id} style={[styles.classCard, styles.locked]}>
+        <View style={styles.classBody}><View style={styles.classRow}><Text style={styles.className}>{item.name}</Text><Text style={styles.badge}>СКОРО</Text></View><Text style={styles.classDescription}>{item.description}</Text></View>
+      </View>)}
+      {(levels.error || start.error) && <Text style={styles.error}>{(levels.error ?? start.error)?.message ?? 'Не удалось открыть уровни'}</Text>}
     </ScrollView>
   )
 }

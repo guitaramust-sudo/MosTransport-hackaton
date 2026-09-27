@@ -260,6 +260,7 @@ export interface WagonSeat {
 
 export interface WagonState {
   class_id: 'standard'
+  level_id: string
   restricted_anchors: WagonAnchor[]
   seats: WagonSeat[]
   player: WagonActor
@@ -294,6 +295,18 @@ export interface WagonStartResponse {
 
 export interface WagonClassesResponse {
   classes: Record<WagonClassId, WagonClassStatus>
+}
+
+export interface WagonLevel {
+  id: string
+  order: number
+  title: string
+  intro?: string
+  status: 'locked' | 'unlocked' | 'passed'
+}
+
+export interface WagonLevelsResponse {
+  levels: WagonLevel[]
 }
 
 export type WagonPhysicalRequirement =

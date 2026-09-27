@@ -1,6 +1,6 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
-import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonClassId, WagonStartResponse } from '../types'
+import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonLevelsResponse, WagonStartResponse } from '../types'
 
 const expoHost = Constants.expoConfig?.hostUri?.split(':')[0]
 const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'localhost'
@@ -102,6 +102,7 @@ export const api = {
   liveDialogue: (id: string, body: { command_id: string; expected_state_version: number; event_id: string; text: string }) =>
     request<LiveSimulation>(`/api/session/simulations/${id}/dialogue`, 'POST', body),
   getWagonClasses: () => request<WagonClassesResponse>('/api/wagon/classes'),
-  startWagonSession: (classId: WagonClassId = 'standard') =>
-    request<WagonStartResponse>('/api/session/wagon/start', 'POST', { class_id: classId }),
+  getWagonLevels: () => request<WagonLevelsResponse>('/api/wagon/levels'),
+  startWagonSession: (levelId: string) =>
+    request<WagonStartResponse>('/api/session/wagon/start', 'POST', { level_id: levelId }),
 }

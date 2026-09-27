@@ -1,10 +1,9 @@
 # Интеграция real-time вагона во фронтенд
 
 Документ для разработчика Expo/React Native и web-клиента. Фактический контракт
-бэкенда: [WAGON_API.md](../backend/WAGON_API.md). Этот режим **отдельный** от
-текущих `SimulationPage` (последовательная смена) и `LiveSimulationPage`
-(ветвящийся демо-сценарий). Ни один из этих экранов пока не подключён к
-WebSocket вагона.
+бэкенда: [WAGON_API.md](../backend/WAGON_API.md). Режим реализован в
+`WagonLobbyPage` и `WagonPage`; он **отдельный** от `SimulationPage`
+(последовательная смена) и `LiveSimulationPage` (ветвящийся демо-сценарий).
 
 ## Что нужно показать игроку
 
@@ -21,15 +20,15 @@ WebSocket вагона.
 сигнал без раскрытия текста; всего каталог содержит 54 сценария. Детали и
 разговор открывайте при взаимодействии игрока с пассажиром.
 
-## Куда подключать в текущем клиенте
+## Где реализовано в текущем клиенте
 
-| Файл | Изменение |
+| Файл | Назначение |
 | --- | --- |
-| [src/api/client.ts](src/api/client.ts) | Добавить `getWagonClasses`, `startWagonSession`, доступ к актуальному access-токену и сборку WS URL. Уже есть `getSession`, `getSituation`, `sendMessage`, `escalate`, `finishSituation`, `finishSession`. |
-| [src/types/index.ts](src/types/index.ts) | Добавить типы ниже и поля `seat_anchor`, `physical_requirement`, `physical_action_done` в `Situation`; `wagon_state` в `Session`. |
-| [src/app/store.ts](src/app/store.ts) | Хранить `wagonSessionId`, последний полный снимок, выбранную ситуацию и статус соединения. Не смешивать их с `liveSimulation`. |
-| [src/components/RootNavigator.tsx](src/components/RootNavigator.tsx), [src/pages/HomePage.tsx](src/pages/HomePage.tsx) | Добавить выбор класса, запуск/возобновление вагона и отдельный экран. |
-| [src/components/GameWorld.web.tsx](src/components/GameWorld.web.tsx), [src/components/GameWorld.native.tsx](src/components/GameWorld.native.tsx) | Привязать якоря сервера к точкам модели, рисовать шесть пассажиров и движение по `actor.moving`. Сейчас `GameWorld.web.tsx` использует четыре локальных `questAnchors` и движение только на клиенте. |
+| [src/api/client.ts](src/api/client.ts) | HTTP-методы уровней/смены, актуальный access-токен и сборка WS URL. |
+| [src/types/index.ts](src/types/index.ts) | Типы вагона, уровней и физических требований. |
+| [src/app/store.ts](src/app/store.ts) | ID смены, полный снимок, выбранная ситуация и статус соединения. |
+| [src/pages/WagonLobbyPage.tsx](src/pages/WagonLobbyPage.tsx), [src/pages/WagonPage.tsx](src/pages/WagonPage.tsx) | Выбор уровня, запуск, диалог, физические действия и переподключение. |
+| [src/components/WagonWorld.web.tsx](src/components/WagonWorld.web.tsx), [src/components/WagonWorld.native.tsx](src/components/WagonWorld.native.tsx) | 3D-сцена и символические якоря. |
 
 Не подставляйте вагонный `session_id` в `/api/session/simulations/*`: это другой
 движок с другим форматом состояния.
@@ -38,9 +37,12 @@ WebSocket вагона.
 
 Все HTTP-запросы используют `Authorization: Bearer <access_token>`.
 
-1. `GET /api/wagon/classes` → `{"classes":{"standard":"available","comfort":"coming_soon",…}}`.
-   Покажите закрытые классы как недоступные.
-2. `POST /api/session/wagon/start` с `{"class_id":"standard"}` → `201` и
+1. `GET /api/wagon/levels` → `{"levels":[{"id":"orientation","order":1,
+   "title":"Ориентация в вагоне","intro":"...","status":"unlocked"},…]}`.
+   `status` бывает `locked`, `unlocked` и `passed`; закрытый уровень нельзя
+   запускать, а пройденный можно повторить. `GET /api/wagon/classes` показывает
+   доступность классов отдельно от уровней.
+2. `POST /api/session/wagon/start` с `{"level_id":"orientation"}` → `201` и
    `{"session_id":"<uuid>","ws_path":"/api/wagon/<uuid>/ws"}`. Сохраните
    `session_id`: отдельного эндпоинта для поиска последней вагонной смены нет.
 3. Подключитесь к `ws_path` по WebSocket с JWT в query-параметре `token`.
@@ -57,9 +59,10 @@ WebSocket вагона.
 5. `POST /api/session/{session_id}/finish` закрывает оставшиеся ситуации,
    возвращает разбор и закрывает WebSocket. Покажите итог по ответу REST.
 
-После 480 секунд новые ситуации перестают появляться, но смена **не
-завершается автоматически**: игроку нужен явный выход/завершение. Если игрок
-просто закрыл экран, сервер продолжает смену и таймеры ситуаций.
+После 480 секунд новые ситуации перестают появляться. Сервер сам смену не
+завершает; текущий `WagonPage` вызывает `/finish` при истечении времени.
+Если игрок просто закрыл экран раньше, сервер продолжает смену и таймеры
+ситуаций.
 
 ## Типы для клиента
 
@@ -80,6 +83,7 @@ type WagonSeat = {
 }
 type WagonState = {
   class_id: 'standard'
+  level_id: string
   restricted_anchors: Anchor[]
   seats: WagonSeat[]
   player: WagonActor
@@ -115,8 +119,8 @@ type WagonCommand =
 
 ## WebSocket: подключение и команды
 
-В текущем [client.ts](src/api/client.ts) токены скрыты в переменной модуля:
-для WS понадобится функция получения **актуального** access-токена. HTTP
+В текущем [client.ts](src/api/client.ts) токены скрыты в переменной модуля;
+`getAccessToken()` возвращает **актуальный** access-токен для WS. HTTP
 обновляет токен при `401`, WebSocket сам этого не делает. Пример сборки URL:
 
 ```ts
@@ -198,8 +202,8 @@ JWT или полный WS URL в логи и аналитику.
 
 ## Проверка готовности фронта
 
-1. Открыть `standard`, получить шесть сидящих пассажиров и игрока у
-   `service_point`; остальные классы заблокированы.
+1. Открыть `orientation` в классе `standard`, получить шесть сидящих пассажиров
+   и игрока у `service_point`; остальные уровни изначально заблокированы.
 2. Получить новую ситуацию через WS без текстового попапа; параллельные
    ситуации не вытесняют друг друга.
 3. Открыть диалог у пассажира, увидеть ответ Mock/GigaChat через `/message`.
