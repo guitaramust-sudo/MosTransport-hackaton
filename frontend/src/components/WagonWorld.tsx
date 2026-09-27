@@ -1,7 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { ActivityIndicator, PanResponder, Pressable, StyleSheet, View } from 'react-native'
-import { Mesh, RepeatWrapping, SRGBColorSpace, Vector3, type Texture, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
-import { conductorAsset, forestAsset, wagonAsset } from '../helpers/gameAssets'
+import { LoopOnce, LoopRepeat, Mesh, RepeatWrapping, SRGBColorSpace, Vector3, type Texture, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { conductorAsset, forestAsset, passengerAssetFor, wagonAsset } from '../helpers/gameAssets'
 import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, textureSource, useTexture, useThree, useWagonScene } from '../helpers/three'
 import { colors } from '../helpers/theme'
 import { AISLE_MAX_Z, AISLE_MIN_Z, aislePoint, wagonAnchorLabels, interpolateWagonActor, pointAlong, pointsOfInterestFor, routeBetween, servicePointFor, wagonAnchorPositions, wagonSituationIcon, type FloorPoint } from '../helpers/wagonMap'
@@ -62,32 +63,62 @@ function routeLengthOf(route: FloorPoint[]) {
 
 function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSituationType; onPress: () => void }) {
   const group = useRef<Group>(null)
-  const head = useRef<Group>(null)
-  const color = useMemo(() => {
-    const palette = ['#3158CC', '#16A085', '#F59E0B', '#E83343', '#8B5CF6', '#0EA5E9']
-    const score = [...seat.passenger_def_id].reduce((sum, char) => sum + char.charCodeAt(0), 0)
-    return palette[score % palette.length]
-  }, [seat.passenger_def_id])
+  const model = useGLTF(passengerAssetFor(seat.passenger_def_id)) as unknown as { scene: Group; animations: AnimationClip[] }
+  // GLTFLoader caches the source scene. Every passenger needs independent bones
+  // and animation actions, even when two seats use the same character variant.
+  const scene = useMemo(() => cloneSkeleton(model.scene) as Group, [model.scene])
+  const { actions } = useAnimations(model.animations, scene) as unknown as { actions: Record<string, AnimationAction | null> }
+  const currentAction = useRef<string | null>(null)
+  const previousMode = useRef<string | null>(null)
+  const sitUntil = useRef(0)
+  const seatBlend = useRef(seat.actor.at.startsWith('seat_') && !seat.actor.moving ? 1 : 0)
 
-  useFrame(({ clock }) => {
+  useEffect(() => {
+    scene.traverse((object) => { if (object instanceof Mesh) object.frustumCulled = false })
+    return () => Object.values(actions).forEach((action) => action?.stop())
+  }, [actions, scene])
+
+  useFrame(({ clock }, delta) => {
     if (!group.current) return
     const position = interpolateWagonActor(seat.actor)
-    group.current.position.set(position.x, position.y, position.z)
     const seated = seat.actor.at.startsWith('seat_') && !seat.actor.moving
-    group.current.rotation.y = seated ? (seat.anchor.endsWith('1') || seat.anchor.endsWith('3') || seat.anchor.endsWith('5') ? Math.PI / 2 : -Math.PI / 2) : position.heading
+    // The animation moves the hips 46 cm toward the seat back. These anchors
+    // mark seat centres, so nudge the model toward the aisle and cushion.
+    seatBlend.current += ((seated ? 1 : 0) - seatBlend.current) * Math.min(1, delta * 5)
+    const aisleSide = seat.anchor.endsWith('1') || seat.anchor.endsWith('3') || seat.anchor.endsWith('5') ? 1 : -1
+    group.current.position.set(position.x + aisleSide * 0.18 * seatBlend.current, position.y - 0.08 * seatBlend.current, position.z)
+    const mode = seat.actor.moving ? 'moving' : seated ? 'seated' : 'standing'
+    if (mode !== previousMode.current) {
+      if (mode === 'seated' && previousMode.current !== null) sitUntil.current = Date.now() + 2000
+      previousMode.current = mode
+    }
+    const elapsed = seat.actor.moving ? Date.now() - Date.parse(seat.actor.moving.started_at) : 0
+    const animation = mode === 'seated'
+      ? (Date.now() < sitUntil.current ? 'SitDown' : 'IdleSeated')
+      : mode === 'moving'
+        ? (seat.actor.moving?.from.startsWith('seat_') && elapsed < 2000 ? 'StandUp' : 'Walk')
+        : 'StandUp'
+    if (animation !== currentAction.current) {
+      if (currentAction.current) actions[currentAction.current]?.fadeOut(0.15)
+      const action = actions[animation]
+      if (action) {
+        action.reset()
+        const repeats = animation === 'IdleSeated' || animation === 'Walk'
+        action.setLoop(repeats ? LoopRepeat : LoopOnce, repeats ? Infinity : 1)
+        action.clampWhenFinished = animation === 'SitDown' || animation === 'StandUp'
+        action.fadeIn(0.15).play()
+        currentAction.current = animation
+      }
+    }
+    group.current.rotation.y = seated ? aisleSide * Math.PI / 2 : position.heading
     group.current.rotation.z = type === 'cold' ? Math.sin(clock.elapsedTime * 9) * 0.02 : 0
-    if (head.current) head.current.position.y = 1.19 + (type === 'tired' ? Math.sin(clock.elapsedTime * 3) * 0.07 : 0)
   })
 
   return (
     <group ref={group} onClick={(event) => { event.stopPropagation(); if (event.delta <= CLICK_SLOP) onPress() }}>
-      <mesh position={[0, 0.76, 0]}><capsuleGeometry args={[0.18, 0.36, 6, 12]} /><meshStandardMaterial color={color} /></mesh>
-      <group ref={head} position={[0, 1.19, 0]}>
-        <mesh><sphereGeometry args={[0.19, 20, 20]} /><meshStandardMaterial color="#F1BE94" /></mesh>
-        <mesh position={[0, 0.09, -0.08]}><sphereGeometry args={[0.2, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} /><meshStandardMaterial color="#27344B" /></mesh>
-      </group>
+      <primitive object={scene} />
       <mesh position={[0, 0.58, 0]}><sphereGeometry args={[0.42, 12, 12]} /><meshBasicMaterial transparent opacity={0} /></mesh>
-      {type && <mesh position={[0, 1.58, 0]}><sphereGeometry args={[0.075, 16, 16]} /><meshStandardMaterial color={type === 'zone_intrusion' ? colors.critical : colors.loyalty} emissive={type === 'zone_intrusion' ? colors.critical : colors.primary} emissiveIntensity={1.1} /></mesh>}
+      {type && <mesh position={[0, 1.72, 0]}><sphereGeometry args={[0.075, 16, 16]} /><meshStandardMaterial color={type === 'zone_intrusion' ? colors.critical : colors.loyalty} emissive={type === 'zone_intrusion' ? colors.critical : colors.primary} emissiveIntensity={1.1} /></mesh>}
     </group>
   )
 }
@@ -359,7 +390,7 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
         <planeGeometry args={[3.4, AISLE_MAX_Z - AISLE_MIN_Z]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {snapshot.wagon_state.seats.map((seat) => <Passenger key={seat.anchor} seat={seat} type={situations.get(seat.anchor)} onPress={() => { if (!disabled && situations.has(seat.anchor)) onAnchorPress(seat.anchor) }} />)}
+      {snapshot.wagon_state.seats.map((seat) => <Suspense key={seat.anchor} fallback={null}><Passenger seat={seat} type={situations.get(seat.anchor)} onPress={() => { if (!disabled && situations.has(seat.anchor)) onAnchorPress(seat.anchor) }} /></Suspense>)}
       <Conductor actor={snapshot.wagon_state.player} freeTarget={freeTarget} playerPosition={playerPosition} joystick={joystick} />
       <CabFade scene={wagonScene as Group} playerPosition={playerPosition} />
       <AwayWatcher actor={snapshot.wagon_state.player} playerPosition={playerPosition} onAwayChange={onAwayChange} />
