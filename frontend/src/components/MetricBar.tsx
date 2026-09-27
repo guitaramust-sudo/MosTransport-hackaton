@@ -29,8 +29,8 @@ const styles = StyleSheet.create({
   metric: { flex: 1, minWidth: 120 },
   compact: { minWidth: 100 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '600' },
-  value: { fontSize: 16, fontWeight: '800' },
-  track: { height: 6, borderRadius: radius.pill, backgroundColor: '#E5EAEC', overflow: 'hidden' },
+  label: { color: colors.secondary, fontSize: 12, fontWeight: '500' },
+  value: { fontSize: 16, fontWeight: '700' },
+  track: { height: 6, borderRadius: radius.pill, backgroundColor: colors.soft, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: radius.pill },
 })
