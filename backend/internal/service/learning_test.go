@@ -288,6 +288,25 @@ func TestGetLessonRejectsLockedLesson(t *testing.T) {
 	}
 }
 
+func TestGetLessonExposesPracticeGoals(t *testing.T) {
+	store := newFakeLearningStore()
+	svc := newTestLearningService(store, content.Catalog{}, content.WagonClasses{}, testLearningCurriculum(), nil, nil)
+
+	detail, err := svc.GetLesson(context.Background(), uuid.New(), "L1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.CompletionRule != "visit_inspect" {
+		t.Fatalf("completion_rule = %q, want visit_inspect", detail.CompletionRule)
+	}
+	if len(detail.RequiredAnchorIDs) != 1 || detail.RequiredAnchorIDs[0] != "a1" {
+		t.Fatalf("required_anchor_ids = %v, want [a1]", detail.RequiredAnchorIDs)
+	}
+	if len(detail.RequiredObjectIDs) != 1 || detail.RequiredObjectIDs[0] != "o1" {
+		t.Fatalf("required_object_ids = %v, want [o1]", detail.RequiredObjectIDs)
+	}
+}
+
 func TestFinalizePracticeBeforePassReportsMissing(t *testing.T) {
 	store := newFakeLearningStore()
 	svc := newTestLearningService(store, content.Catalog{}, content.WagonClasses{}, testLearningCurriculum(), nil, nil)

@@ -219,6 +219,13 @@ type LessonDetail struct {
 	TheoryCards []string              `json:"theory_cards"`
 	Questions   []LessonQuestionView  `json:"questions"`
 	Progress    domain.LessonProgress `json:"progress"`
+	// Practice goals the client shows as a checklist. They are public lesson
+	// facts (GDD §31 lists them), not answer keys.
+	CompletionRule    string   `json:"completion_rule"`
+	RequiredAnchorIDs []string `json:"required_anchor_ids"`
+	RequiredObjectIDs []string `json:"required_object_ids"`
+	EstimatedMin      int      `json:"estimated_min"`
+	BadgeID           string   `json:"badge_id"`
 }
 
 // redactQuestion builds the player-facing view of a content.Question.
@@ -269,6 +276,12 @@ func (s *LearningService) GetLesson(ctx context.Context, playerID uuid.UUID, les
 		TheoryCards: lesson.TheoryCards,
 		Questions:   questions,
 		Progress:    progress,
+
+		CompletionRule:    lesson.CompletionRule,
+		RequiredAnchorIDs: append([]string{}, lesson.RequiredAnchorIDs...),
+		RequiredObjectIDs: append([]string{}, lesson.RequiredObjectIDs...),
+		EstimatedMin:      lesson.EstimatedMin,
+		BadgeID:           lesson.BadgeID,
 	}, nil
 }
 
