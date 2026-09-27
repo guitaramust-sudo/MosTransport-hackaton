@@ -111,9 +111,7 @@ async function request<T>(path: string, method = 'GET', body?: object, retry = t
 export const api = {
   login: (email: string, password: string) => request<AuthResult>('/auth/login', 'POST', { email, password }),
   createPlayer: (body: { email: string; username: string; password: string; brigade_name: string }) => request<{ player: Player }>('/admin/players', 'POST', body),
-  upsertExternalUser: (body: { source_system: string; external_user_id: string; display_name?: string; depot_id?: string; brigade_id?: string; assigned_class_ids: string[] }) => request<{ user_id: string; created: boolean; player: Player }>('/admin/users', 'POST', body),
   learningSummary: (id: string) => request<AdminLearningSummary>(`/admin/users/${encodeURIComponent(id)}/learning-summary`),
-  approveSession: (id: string) => request<{ session_id: string; validation_status: string }>(`/admin/sessions/${encodeURIComponent(id)}/approve`, 'POST', {}),
   profile: async () => normalizeProfile(await request<Profile>('/api/profile')),
   registerPushSubscription: (platform: 'android' | 'ios', deviceToken: string) =>
     request<{ status: string }>('/api/me/push-subscriptions', 'POST', { platform, device_token: deviceToken }),

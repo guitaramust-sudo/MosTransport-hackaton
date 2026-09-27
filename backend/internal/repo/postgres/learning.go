@@ -44,6 +44,53 @@ func (s *Store) RecordPassedLessonPractice(ctx context.Context, playerID uuid.UU
 	return count, err
 }
 
+// ListLessonProgressByPlayer returns every lesson_progress row for playerID,
+// across all lessons they have touched (in no particular order — callers
+// that need a specific lesson map/join it themselves).
+func (s *Store) ListLessonProgressByPlayer(ctx context.Context, playerID uuid.UUID) ([]domain.LessonProgress, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+lessonProgressColumns+` FROM lesson_progress WHERE player_id = $1`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.LessonProgress
+	for rows.Next() {
+		var p domain.LessonProgress
+		if err := rows.Scan(scanLessonProgress(&p)...); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+const lessonAwardColumns = `player_id, lesson_id, award_type, xp_delta, badge_id, awarded_at`
+
+// ListLessonAwardsByPlayer returns every lesson_awards row for playerID.
+func (s *Store) ListLessonAwardsByPlayer(ctx context.Context, playerID uuid.UUID) ([]domain.LessonAward, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+lessonAwardColumns+` FROM lesson_awards WHERE player_id = $1`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.LessonAward
+	for rows.Next() {
+		var a domain.LessonAward
+		var badge *string
+		row := []any{&a.PlayerID, &a.LessonID, &a.AwardType, &a.XPDelta, &badge, &a.AwardedAt}
+		if err := rows.Scan(row...); err != nil {
+			return nil, err
+		}
+		if badge != nil {
+			a.BadgeID = *badge
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // UpsertLessonProgress fully replaces the (player_id, lesson_id) row.
 func (s *Store) UpsertLessonProgress(ctx context.Context, p domain.LessonProgress) error {
 	if p.ContentVersion == "" {

@@ -81,7 +81,6 @@ type Store interface {
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
 	FinishSession(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
 	FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID uuid.UUID, xp int, awards map[string]CompetencyAward, expectedSituations, expectedPending int, finishedAt time.Time) (bool, error)
-	ApproveSession(ctx context.Context, id uuid.UUID) error
 	ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]domain.Session, error)
 
 	// Refresh tokens
@@ -117,6 +116,8 @@ type Store interface {
 	HasCorrectLessonAnswer(ctx context.Context, playerID uuid.UUID, lessonID, questionID string) (bool, error)                 // true iff any past answer for this question was correct
 	RecordPassedLessonPractice(ctx context.Context, playerID uuid.UUID, lessonID string, sessionID uuid.UUID) (int, error)     // idempotent per session; returns total passed runs
 	AwardLessonCompletion(ctx context.Context, playerID uuid.UUID, lessonID string, xpDelta int, badgeID string) (bool, error) // atomic INSERT ... ON CONFLICT DO NOTHING; returns whether it actually inserted (false = already awarded)
+	ListLessonProgressByPlayer(ctx context.Context, playerID uuid.UUID) ([]domain.LessonProgress, error)
+	ListLessonAwardsByPlayer(ctx context.Context, playerID uuid.UUID) ([]domain.LessonAward, error)
 
 	// Prize credits
 	AwardPrizeCredit(ctx context.Context, playerID uuid.UUID, sourceType, sourceID string, amount int, awardedAt, expiresAt time.Time) (bool, error) // INSERT ... ON CONFLICT (player_id, source_type, source_id) DO NOTHING; returns whether it actually inserted (false = already awarded)

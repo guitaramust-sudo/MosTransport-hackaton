@@ -151,12 +151,17 @@ export interface AppNotification {
 }
 
 export interface AdminLearningSummary {
-  data_status: string;
-  subject: { user_id: string; display_name?: string | null; source_system?: string | null; external_user_id?: string | null; assigned_class_ids?: string[] | null };
-  session_outcomes: { approved_completed_count: number; approved_passed_count: number; recent_assessments: Array<{ session_id: string; completed_at?: string | null; session_pass: boolean; session_safety_score: number; loyalty: number; critical_violations: number; unresolved_commitments: number }> };
-  competencies: Array<{ competency_id: number; code: string; name: string; score: number | null; confidence: number; status: string }>;
+  subject: { user_id: string; display_name?: string | null; source_system?: string | null; external_user_id?: string | null; assigned_class_ids: string[] };
+  total_xp: number;
+  player_level: number;
+  leaderboard_points: number;
+  achievements: string[];
+  session_outcomes: { completed_count: number; passed_count: number; recent_assessments: Array<{ session_id: string; completed_at: string; session_pass: boolean; world_safety_current: number; session_safety_score: number; loyalty: number; critical_violations: number; unresolved_commitments: number }> };
+  competencies: Array<{ competency_id: number; code: string; name: string; score: number | null; confidence: number; status: string; evidence_count: number }>;
   wagon_progression: { current_progress: number; levels: Array<{ level_id: string; order: number; title: string; status: 'locked' | 'unlocked' | 'passed'; attempts: number; passed: boolean; last_attempt_at?: string }> };
-  provenance: { scenario_version: string; scoring_rule_version: string; excluded_draft_count: number };
+  lesson_progression: { lessons: Array<{ lesson_id: string; title: string; theory_pass: boolean; practice_pass: boolean; completed: boolean; badge_id?: string; xp_earned: number; completed_at?: string }> };
+  prize_balance: { balance: number; next_expiry_at?: string; shirt_threshold: number; shirt_progress: number };
+  provenance: { as_of: string; scenario_version: string; scoring_rule_version: string };
 }
 
 export interface LivePassenger {

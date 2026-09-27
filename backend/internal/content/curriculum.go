@@ -14,14 +14,13 @@ var curriculumFiles embed.FS
 // design doc). Order is 1-based; chapters are shown to the player even when
 // locked/empty, so LessonIDs may be empty for a not-yet-authored chapter.
 type Chapter struct {
-	ChapterID        string   `json:"chapter_id"`
-	Order            int      `json:"order"`
-	Title            string   `json:"title"`
-	LessonIDs        []string `json:"lesson_ids"`
-	Scope            string   `json:"scope"` // "common" | "class"
-	ClassID          string   `json:"class_id,omitempty"`
-	ContentVersion   string   `json:"content_version"`
-	ValidationStatus string   `json:"validation_status"`
+	ChapterID      string   `json:"chapter_id"`
+	Order          int      `json:"order"`
+	Title          string   `json:"title"`
+	LessonIDs      []string `json:"lesson_ids"`
+	Scope          string   `json:"scope"` // "common" | "class"
+	ClassID        string   `json:"class_id,omitempty"`
+	ContentVersion string   `json:"content_version"`
 }
 
 // Lesson is one LOCKED→THEORY→THEORY_CHECK→PRACTICE→PRACTICE_CHECK→DEBRIEF→
@@ -48,7 +47,6 @@ type Lesson struct {
 	DebriefIntro        string   `json:"debrief_intro"`
 	TargetCompetencies  []string `json:"target_competencies,omitempty"`
 	SourceRefs          []string `json:"source_refs,omitempty"`
-	ValidationStatus    string   `json:"validation_status"`
 }
 
 // QuestionOption is one answer choice. Display order in Options is the
@@ -73,7 +71,6 @@ type Question struct {
 	Options          []QuestionOption  `json:"options,omitempty"`
 	CorrectOptionID  string            `json:"correct_option_id"`
 	FeedbackByAnswer map[string]string `json:"feedback_by_answer,omitempty"`
-	ValidationStatus string            `json:"validation_status"`
 }
 
 // Curriculum is the whole loaded, cross-validated content set.

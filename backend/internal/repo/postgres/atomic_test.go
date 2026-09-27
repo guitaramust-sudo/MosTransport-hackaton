@@ -163,28 +163,6 @@ func TestConcurrentSpawnCreatesOnlyOneSituation(t *testing.T) {
 	}
 }
 
-func TestApproveRequiresFinishedSession(t *testing.T) {
-	store, playerID := integrationStore(t)
-	ctx := context.Background()
-	sess, situations, err := store.CreateSessionWithSituations(ctx, playerID, nil, []domain.Situation{draftSituation(time.Now().Add(time.Minute))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ApproveSession(ctx, sess.ID); !errors.Is(err, repo.ErrConflict) {
-		t.Fatalf("active approval: %v", err)
-	}
-	closeTestSituation(t, store, situations[0])
-	if _, err := store.FinishSessionAndAwardXP(ctx, sess.ID, playerID, 0, nil, 1, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ApproveSession(ctx, sess.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ApproveSession(ctx, uuid.New()); !errors.Is(err, repo.ErrNotFound) {
-		t.Fatalf("missing approval: %v", err)
-	}
-}
-
 func closeTestSituation(t *testing.T, store *Store, sit domain.Situation) {
 	t.Helper()
 	outcome := "success"

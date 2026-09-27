@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/mostransport/vsm-trainer/internal/repo"
 	"github.com/mostransport/vsm-trainer/internal/service"
 )
 
@@ -47,34 +46,6 @@ func (h *Handlers) CreatePlayerAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"player": player})
-}
-
-func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid session id")
-		return
-	}
-	if err := h.Admin.ApproveSession(r.Context(), id); err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		if errors.Is(err, repo.ErrConflict) {
-			writeError(w, http.StatusConflict, "session is not finished")
-			return
-		}
-		if errors.Is(err, service.ErrUnapprovedContent) {
-			writeError(w, http.StatusConflict, "session contains unapproved content")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"session_id":        id.String(),
-		"validation_status": "approved",
-	})
 }
 
 func (h *Handlers) LearningSummary(w http.ResponseWriter, r *http.Request) {
