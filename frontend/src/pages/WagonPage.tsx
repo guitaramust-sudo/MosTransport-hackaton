@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api, getWagonWebSocketUrl } from '../api/client'
-import { navigate, setWagonBreakdown, setWagonConnection, setWagonSelectedSituation, updateWagonSnapshot, useAppDispatch, useAppSelector } from '../app/store'
+import { lessonPracticeFinished, navigate, setWagonBreakdown, setWagonConnection, setWagonSelectedSituation, updateWagonSnapshot, useAppDispatch, useAppSelector } from '../app/store'
 import { Text, TextInput } from '../components/Typography'
 import { WagonWorld } from '../components/WagonWorld'
 import { colors, radius, shadow } from '../helpers/theme'
 import { translateBackendField, translateBackendText } from '../helpers/backendTranslations'
-import { wagonAnchorLabels, wagonItemLabels, wagonSituationIcon } from '../helpers/wagonMap'
+import { objectsAtAnchor, pointsOfInterestFor, servicePointFor, wagonAnchorLabels, wagonItemLabels, wagonObjectLabels, wagonSituationIcon } from '../helpers/wagonMap'
 import type { SessionResponse, WagonActiveSituation, WagonAnchor, WagonError, WagonItem, WagonSnapshot } from '../types'
 
 type WagonCommand =
@@ -15,6 +15,8 @@ type WagonCommand =
   | { type: 'pick_item'; item: WagonItem }
   | { type: 'give_item'; situation_id: string; item: WagonItem }
   | { type: 'redirect'; situation_id: string }
+  | { type: 'visit'; anchor: WagonAnchor }
+  | { type: 'inspect'; item: string }
 
 const escalationTargets = [
   ['train_chief', 'Начальник поезда'], ['ptb', 'ПТБ'], ['police', 'Полиция'], ['medic', 'Медик'], ['ambulance', 'Скорая'],
@@ -45,7 +47,10 @@ function connectionLabel(status: string) {
 export function WagonPage() {
   const dispatch = useAppDispatch()
   const queryClient = useQueryClient()
-  const { wagonSessionId: sessionId, wagonWsPath: wsPath, wagonSnapshot: snapshot, wagonConnection: connection, wagonSelectedSituationId: selectedId } = useAppSelector((state) => state.app)
+  const { wagonSessionId: sessionId, wagonWsPath: wsPath, wagonSnapshot: snapshot, wagonConnection: connection, wagonSelectedSituationId: selectedId, lessonId, lessonPracticeSessionId } = useAppSelector((state) => state.app)
+  const isLessonPractice = Boolean(sessionId && lessonId && lessonPracticeSessionId === sessionId)
+  const lesson = useQuery({ queryKey: ['lesson', lessonId], queryFn: () => api.lesson(lessonId!), enabled: isLessonPractice })
+  const visitSent = useRef(new Set<string>())
   const socketRef = useRef<WebSocket | null>(null)
   const autoFinishStarted = useRef(false)
   const [pendingSituationId, setPendingSituationId] = useState<string | null>(null)
@@ -53,6 +58,15 @@ export function WagonPage() {
   const [showService, setShowService] = useState(false)
   const [serviceContext, setServiceContext] = useState<{ situationId: string; item: WagonItem } | null>(null)
   const [message, setMessage] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (text: string) => {
+    setToast(text)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 1800)
+  }
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -64,7 +78,7 @@ export function WagonPage() {
   })
 
   useEffect(() => {
-    if (!sessionId) { dispatch(navigate('wagon_lobby')); return }
+    if (!sessionId) { dispatch(navigate('practice')); return }
     let disposed = false
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let reconnectAttempt = 0
@@ -92,7 +106,8 @@ export function WagonPage() {
           const restoredState = restoredSnapshot(restored)
           if (restoredState) dispatch(updateWagonSnapshot(restoredState))
           if (restored.session.status === 'finished') {
-            dispatch(setWagonBreakdown(await api.finishSession(sessionId)))
+            const breakdown = await api.finishSession(sessionId)
+            dispatch(isLessonPractice ? lessonPracticeFinished() : setWagonBreakdown(breakdown))
             return
           }
         } catch { /* next reconnect attempt will retry auth and state */ }
@@ -108,7 +123,7 @@ export function WagonPage() {
       socketRef.current = null
       if (socket) { socket.onclose = null; socket.close() }
     }
-  }, [dispatch, sessionId, wsPath])
+  }, [dispatch, sessionId, wsPath, isLessonPractice])
 
   const sendCommand = useCallback((command: WagonCommand) => {
     const socket = socketRef.current
@@ -117,6 +132,8 @@ export function WagonPage() {
     setError(null)
     return true
   }, [])
+  const sendCommandRef = useRef<typeof sendCommand | null>(null)
+  sendCommandRef.current = sendCommand
 
   const activeById = useCallback((id: string) => snapshot?.active_situations.find((item) => item.situation_id === id), [snapshot])
   const seatForSituation = useCallback((active: WagonActiveSituation) => snapshot?.wagon_state.seats.find((seat) => seat.anchor === active.seat_anchor), [snapshot])
@@ -139,11 +156,23 @@ export function WagonPage() {
     if (isNearSituation(active)) openSituation(pendingSituationId)
   }, [activeById, isNearSituation, openSituation, pendingSituationId, snapshot])
 
+  const servicePoint = servicePointFor(snapshot?.wagon_state.class_id ?? 'standard')
+
+  // Arriving at a point of interest is the "visit" fact lessons check (GDD §31).
   useEffect(() => {
-    if (serviceRequested && snapshot && !snapshot.wagon_state.player.moving && snapshot.wagon_state.player.at === 'service_point') {
+    if (!isLessonPractice || !snapshot) return
+    const { player, visited_anchors: visited } = snapshot.wagon_state
+    if (player.moving) return
+    if (!pointsOfInterestFor(snapshot.wagon_state.class_id).includes(player.at)) return
+    if (visited?.includes(player.at) || visitSent.current.has(player.at)) return
+    if (sendCommandRef.current?.({ type: 'visit', anchor: player.at })) visitSent.current.add(player.at)
+  }, [isLessonPractice, snapshot])
+
+  useEffect(() => {
+    if (serviceRequested && snapshot && !snapshot.wagon_state.player.moving && snapshot.wagon_state.player.at === servicePoint) {
       setServiceRequested(false); setShowService(true)
     }
-  }, [serviceRequested, snapshot])
+  }, [serviceRequested, snapshot, servicePoint])
 
   useEffect(() => {
     if (selectedId && snapshot && !activeById(selectedId)) dispatch(setWagonSelectedSituation(null))
@@ -152,10 +181,22 @@ export function WagonPage() {
   const handleAnchorPress = (anchor: WagonAnchor) => {
     if (!snapshot) return
     if (snapshot.wagon_state.player.moving) return
-    if (anchor === 'service_point') {
+    const isSeat = anchor.startsWith('seat_')
+    const here = snapshot.wagon_state.player.at === anchor
+    // In a lesson, points of interest are places to walk to and inspect.
+    if (!isSeat && (isLessonPractice || anchor !== servicePoint)) {
+      if (!here) { sendCommand({ type: 'move_to', anchor }); return }
+      // Already standing here: act on the point instead of ignoring the tap.
+      const inspectable = (objectsAtAnchor[anchor] ?? []).find((object) => !(snapshot.wagon_state.inspected_objects ?? []).includes(object) && (lesson.data?.required_object_ids ?? []).includes(object))
+      if (inspectable) { sendCommand({ type: 'inspect', item: inspectable }); return }
+      if (anchor === servicePoint) { setServiceContext(null); setShowService(true); return }
+      showToast(`Вы уже здесь: ${wagonAnchorLabels[anchor]}`)
+      return
+    }
+    if (anchor === servicePoint) {
       setServiceContext(null)
       setServiceRequested(true)
-      if (!snapshot.wagon_state.player.moving && snapshot.wagon_state.player.at === anchor) { setServiceRequested(false); setShowService(true) }
+      if (snapshot.wagon_state.player.at === anchor) { setServiceRequested(false); setShowService(true) }
       else sendCommand({ type: 'move_to', anchor })
       return
     }
@@ -188,7 +229,7 @@ export function WagonPage() {
     try {
       const breakdown = await api.finishSession(sessionId)
       await queryClient.invalidateQueries({ queryKey: ['wagon-levels'] })
-      dispatch(setWagonBreakdown(breakdown))
+      dispatch(isLessonPractice ? lessonPracticeFinished() : setWagonBreakdown(breakdown))
     }
     catch (cause) { autoFinishStarted.current = false; setError(cause instanceof Error ? cause.message : 'Не удалось завершить смену'); setBusy(false) }
   }
@@ -201,11 +242,8 @@ export function WagonPage() {
     void finishShift()
   }, [sessionId, snapshot?.game_time_s, snapshot?.wagon_state.duration_s])
 
-  const openMenu = () => Alert.alert('Смена в вагоне', 'Можно выйти на главную и продолжить эту смену позже.', [
-    { text: 'Продолжить', style: 'cancel' },
-    { text: 'На главную', onPress: () => dispatch(navigate('home')) },
-    { text: 'Завершить смену', style: 'destructive', onPress: () => void finishShift() },
-  ])
+  // Alert.alert is a no-op on web, so the pause menu is an in-game sheet.
+  const openMenu = () => setMenuOpen(true)
 
   if (!sessionId) return null
   if (!snapshot) return (
@@ -231,6 +269,21 @@ export function WagonPage() {
     sendCommand({ type: 'move_to', anchor: targetSeat.actor.at })
   }
 
+  const visited = new Set<string>(snapshot.wagon_state.visited_anchors ?? [])
+  const inspected = new Set<string>(snapshot.wagon_state.inspected_objects ?? [])
+  const goals = lesson.data ? [
+    ...lesson.data.required_anchor_ids.map((id) => ({ id, label: wagonAnchorLabels[id as WagonAnchor] ?? id, done: visited.has(id), verb: 'Посетить', target: id as WagonAnchor })),
+    ...lesson.data.required_object_ids.map((id) => ({
+      id, label: wagonObjectLabels[id] ?? id, done: inspected.has(id), verb: 'Осмотреть',
+      target: (Object.keys(objectsAtAnchor) as WagonAnchor[]).find((anchor) => objectsAtAnchor[anchor]?.includes(id)),
+    })),
+  ] : []
+  const goalsDone = goals.filter((goal) => goal.done).length
+  const player = snapshot.wagon_state.player
+  const inspectHere = isLessonPractice && !player.moving
+    ? (objectsAtAnchor[player.at] ?? []).filter((object) => !inspected.has(object) && (lesson.data?.required_object_ids ?? []).includes(object))
+    : []
+
   const sendPhysical = (command: WagonCommand) => {
     if (!sendCommand(command)) return
     setTimeout(() => { if (selectedId) void queryClient.invalidateQueries({ queryKey: ['wagon-situation', selectedId] }) }, 500)
@@ -243,16 +296,59 @@ export function WagonPage() {
         <View style={styles.hud} pointerEvents="box-none">
           <View style={styles.topRow}>
             <View style={styles.brand}><Text style={styles.brandText}>ВСМ</Text><View><Text style={styles.shiftLabel}>СМЕНА В ПУТИ</Text><Text style={styles.timer}>{formatTime(remaining)}</Text></View></View>
-            <Pressable onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
           </View>
           <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
           <View style={styles.statusRow}>
-            <View style={[styles.connection, connection !== 'connected' && styles.connectionWarn]}><View style={styles.connectionDot} /><Text style={styles.connectionText}>{connectionLabel(connection)}</Text></View>
-            <Pressable disabled={Boolean(snapshot.wagon_state.player.moving)} onPress={() => { setServiceContext(null); setServiceRequested(true); if (snapshot.wagon_state.player.at === 'service_point' && !snapshot.wagon_state.player.moving) setShowService(true); else sendCommand({ type: 'move_to', anchor: 'service_point' }) }} style={styles.inventory}><Text style={styles.inventoryText}>▣ {carried.length}/3</Text></Pressable>
+            {connection !== 'connected' ? <View style={[styles.connection, styles.connectionWarn]}><View style={[styles.connectionDot, styles.connectionDotWarn]} /><Text style={styles.connectionText}>{connectionLabel(connection)}</Text></View> : <View />}
+            <Pressable disabled={Boolean(snapshot.wagon_state.player.moving)} onPress={() => { setServiceContext(null); setServiceRequested(true); if (snapshot.wagon_state.player.at === servicePoint && !snapshot.wagon_state.player.moving) setShowService(true); else sendCommand({ type: 'move_to', anchor: servicePoint }) }} style={styles.inventory}><Text style={styles.inventoryText}>▣ {carried.length}/3</Text></Pressable>
           </View>
+          {isLessonPractice && lesson.data && (() => {
+            // One task at a time keeps the wagon visible; the counter shows the rest.
+            const next = goals.find((goal) => !goal.done)
+            return (
+              <View style={styles.goals}>
+                <View style={styles.goalsTop}>
+                  <Text style={styles.goalsKicker}>УРОК {lesson.data.lesson_id} · {lesson.data.title.toUpperCase()}</Text>
+                  {goals.length > 0 && <Text style={styles.goalsCount}>{goalsDone}/{goals.length}</Text>}
+                </View>
+                {goals.length === 0 ? (
+                  <Text style={styles.goalText}>Заметьте пассажира, подойдите и выясните его просьбу в разговоре.</Text>
+                ) : next ? (
+                  <Pressable accessibilityRole="button" accessibilityLabel={`${next.verb}: ${next.label}`}
+                    disabled={!next.target || Boolean(player.moving) || player.at === next.target}
+                    onPress={() => { if (next.target && player.at !== next.target) sendCommand({ type: 'move_to', anchor: next.target }) }}
+                    style={styles.goalRow}>
+                    <View style={styles.goalCheck} />
+                    <Text style={styles.goalText}>{next.verb}: {next.label}</Text>
+                    {next.target && player.at !== next.target && <Text style={styles.goalGo}>Идти →</Text>}
+                  </Pressable>
+                ) : (
+                  <View style={styles.goalRow}>
+                    <View style={[styles.goalCheck, styles.goalCheckDone]}><Text style={styles.goalCheckMark}>✓</Text></View>
+                    <Text style={styles.goalText}>Все задачи выполнены — завершите практику</Text>
+                  </View>
+                )}
+              </View>
+            )
+          })()}
+          {toast && <View style={styles.movingToast}><Text style={styles.movingText}>{toast}</Text></View>}
           {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Подходим к пассажиру…</Text></View>}
         </View>
       </View>
+      {isLessonPractice && !selectedId && !showService && (
+        <View style={styles.lessonBar} pointerEvents="box-none">
+          {inspectHere.map((object) => (
+            <Pressable key={object} accessibilityRole="button" onPress={() => sendCommand({ type: 'inspect', item: object })} style={styles.inspectButton}>
+              <Text style={styles.inspectText}>Осмотреть: {wagonObjectLabels[object] ?? object}</Text>
+            </Pressable>
+          ))}
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void finishShift()}
+            style={[styles.finishPractice, goals.length > 0 && goalsDone < goals.length && styles.finishPracticeQuiet]}>
+            <Text style={[styles.finishPracticeText, goals.length > 0 && goalsDone < goals.length && styles.finishPracticeTextQuiet]}>Завершить практику</Text>
+          </Pressable>
+        </View>
+      )}
       {error && <Pressable onPress={() => setError(null)} style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text><Text style={styles.errorClose}>×</Text></Pressable>}
 
       {showService && (
@@ -286,7 +382,7 @@ export function WagonPage() {
               {requirement && !detail.physical_action_done && <View style={styles.physicalCard}>
                 <View style={styles.physicalText}><Text style={styles.physicalTitle}>{requirement.kind === 'deliver_item' ? `Передайте: ${wagonItemLabels[requirement.item]}` : 'Верните пассажира на место'}</Text><Text style={styles.physicalHint}>Сначала подойдите к нужной точке в вагоне</Text></View>
                 {requirement.kind === 'deliver_item' && carried.includes(requirement.item) && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'give_item', situation_id: selectedId, item: requirement.item })} style={styles.smallButton}><Text style={styles.smallButtonText}>Передать</Text></Pressable>}
-                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); setServiceRequested(true); sendCommand({ type: 'move_to', anchor: 'service_point' }) }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
+                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); setServiceRequested(true); if (snapshot.wagon_state.player.at === servicePoint) setShowService(true); else sendCommand({ type: 'move_to', anchor: servicePoint }) }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
                 {requirement.kind === 'redirect' && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'redirect', situation_id: selectedId })} style={styles.smallButton}><Text style={styles.smallButtonText}>Проводить</Text></Pressable>}
               </View>}
               <Text style={styles.helpLabel}>ВЫЗВАТЬ ПОМОЩЬ</Text>
@@ -300,6 +396,22 @@ export function WagonPage() {
           </View>
         </View>
       )}
+      {menuOpen && (
+        <View style={styles.sheetBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Закрыть меню" onPress={() => setMenuOpen(false)} />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <View><Text style={styles.sheetKicker}>ПАУЗА</Text><Text style={styles.sheetTitle}>{isLessonPractice ? 'Практика урока' : 'Смена в вагоне'}</Text></View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={() => setMenuOpen(false)} style={styles.close}><Text style={styles.closeText}>×</Text></Pressable>
+            </View>
+            <Text style={styles.sheetHint}>Можно выйти на главную и вернуться к этому рейсу позже.</Text>
+            <Pressable accessibilityRole="button" onPress={() => setMenuOpen(false)} style={[styles.menuAction, styles.menuActionPrimary]}><Text style={styles.menuActionPrimaryText}>Продолжить</Text></Pressable>
+            <Pressable accessibilityRole="button" onPress={() => { setMenuOpen(false); dispatch(navigate('home')) }} style={styles.menuAction}><Text style={styles.menuActionText}>На главную</Text></Pressable>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setMenuOpen(false); void finishShift() }} style={styles.menuAction}><Text style={styles.menuActionDanger}>{isLessonPractice ? 'Завершить практику' : 'Завершить смену'}</Text></Pressable>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   )
 }
@@ -308,7 +420,30 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#DCE8F4' }, game: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.soft }, vsm: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }, vsmText: { color: '#FFF', fontSize: 23, fontWeight: '900' }, loadingTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' }, loadingText: { color: colors.muted }, errorText: { color: colors.critical, textAlign: 'center', padding: 16 },
   hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] },
-  progressTrack: { height: 7, overflow: 'hidden', borderRadius: 9, backgroundColor: 'rgba(255,255,255,.85)', borderWidth: 1, borderColor: 'rgba(16,26,61,.14)', marginTop: 9 }, progressFill: { height: '100%', borderRadius: 9, backgroundColor: colors.loyalty }, statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, inventory: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 99, backgroundColor: colors.primary }, inventoryText: { color: '#FFF', fontSize: 12, fontWeight: '900' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  progressTrack: { height: 7, overflow: 'hidden', borderRadius: 9, backgroundColor: 'rgba(255,255,255,.85)', borderWidth: 1, borderColor: 'rgba(16,26,61,.14)', marginTop: 9 }, progressFill: { height: '100%', borderRadius: 9, backgroundColor: colors.loyalty }, statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, inventory: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 99, backgroundColor: colors.primary }, inventoryText: { color: '#FFF', fontSize: 12, fontWeight: '900' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  menuAction: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, marginTop: 10 },
+  menuActionPrimary: { backgroundColor: colors.action, borderColor: colors.action },
+  menuActionPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  menuActionText: { color: colors.ink, fontSize: 15, fontWeight: '600' },
+  menuActionDanger: { color: colors.errorInk, fontSize: 15, fontWeight: '600' },
+  goals: { marginTop: 8, alignSelf: 'flex-start', minWidth: 230, maxWidth: 340, borderRadius: 18, padding: 12, backgroundColor: 'rgba(255,255,255,.95)', ...shadow },
+  goalsTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 },
+  goalsKicker: { flex: 1, color: colors.primary, fontSize: 10, fontWeight: '700', letterSpacing: .6 },
+  goalsCount: { color: colors.action, fontSize: 12, fontWeight: '700' },
+  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3 },
+  goalCheck: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  goalCheckDone: { backgroundColor: colors.success, borderColor: colors.success },
+  goalCheckMark: { color: '#FFF', fontSize: 11, fontWeight: '800', lineHeight: 13 },
+  goalText: { flexShrink: 1, color: colors.ink, fontSize: 13, lineHeight: 18 },
+  goalGo: { marginLeft: 'auto', color: colors.action, fontSize: 12, fontWeight: '600' },
+  goalTextDone: { color: colors.muted, textDecorationLine: 'line-through' },
+  lessonBar: { position: 'absolute', left: 16, right: 16, bottom: 64, gap: 8, alignItems: 'center' },
+  inspectButton: { minHeight: 48, maxWidth: 420, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.action, ...shadow },
+  inspectText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  finishPractice: { minHeight: 44, maxWidth: 420, width: '100%', borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+  finishPracticeQuiet: { backgroundColor: 'rgba(255,255,255,.94)', borderWidth: 1, borderColor: colors.border },
+  finishPracticeText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  finishPracticeTextQuiet: { color: colors.ink },
   errorBanner: { position: 'absolute', left: 18, right: 18, top: 132, zIndex: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 14, backgroundColor: colors.critical, padding: 12 }, errorBannerText: { flex: 1, color: '#FFF', fontSize: 12, fontWeight: '700' }, errorClose: { color: '#FFF', fontSize: 22, marginLeft: 8 },
   sheetBackdrop: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 40, justifyContent: 'flex-end', backgroundColor: 'rgba(8,16,46,.28)' }, sheet: { maxHeight: '74%', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 24, backgroundColor: colors.surface, ...shadow }, dialogSheet: { minHeight: '55%' }, sheetHandle: { width: 42, height: 5, borderRadius: 4, alignSelf: 'center', backgroundColor: '#D7DDE8', marginBottom: 16 }, sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, sheetKicker: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1 }, sheetTitle: { color: colors.ink, fontSize: 21, fontWeight: '900', marginTop: 3 }, close: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.soft }, closeText: { color: colors.muted, fontSize: 24, lineHeight: 26 }, sheetHint: { color: colors.muted, fontSize: 13, marginTop: 9 },
   itemRow: { flexDirection: 'row', gap: 8, marginTop: 16 }, itemCard: { flex: 1, minHeight: 112, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.soft }, itemSelected: { borderColor: '#A9D8B9', backgroundColor: '#ECF9F1' }, itemIcon: { color: colors.primary, fontSize: 24, fontWeight: '900' }, itemName: { color: colors.ink, fontSize: 13, fontWeight: '900', marginTop: 7 }, itemState: { color: colors.muted, fontSize: 10, marginTop: 4 },
