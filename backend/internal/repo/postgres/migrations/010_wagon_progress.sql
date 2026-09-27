@@ -1,0 +1,1 @@
+ALTER TABLE players ADD COLUMN wagon_progress INT NOT NULL DEFAULT 0;

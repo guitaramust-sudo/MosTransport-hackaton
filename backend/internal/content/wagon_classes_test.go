@@ -7,7 +7,7 @@ func TestLoadWagonClasses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg := classes["standard"]; cfg.Status != "available" || len(cfg.SeatAnchors) != 6 || cfg.MoveDurationS != 3 || len(cfg.SituationPoolIDs) != 54 {
+	if cfg := classes["standard"]; cfg.Status != "available" || len(cfg.SeatAnchors) != 6 || cfg.MoveDurationS != 3 {
 		t.Fatalf("standard: %+v", cfg)
 	}
 	for _, id := range []string{"comfort", "business", "first"} {

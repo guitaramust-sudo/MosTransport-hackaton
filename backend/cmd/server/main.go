@@ -46,6 +46,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load wagon classes: %w", err)
 	}
+	wagonLevels, err := content.LoadLevels()
+	if err != nil {
+		return fmt.Errorf("load wagon levels: %w", err)
+	}
 	simTemplate, err := simulation.Load()
 	if err != nil {
 		return fmt.Errorf("load simulation template: %w", err)
@@ -82,12 +86,12 @@ func run() error {
 			wagonCatalog.Scenarios = append(wagonCatalog.Scenarios, scenario)
 		}
 	}
-	wagonManager := service.NewWagonManager(store, wagonCatalog)
+	wagonManager := service.NewWagonManager(store, wagonCatalog, wagonLevels)
 	defer wagonManager.StopAll()
 	if err := wagonManager.Recover(ctx, wagonClasses); err != nil {
 		return fmt.Errorf("recover wagon sessions: %w", err)
 	}
-	wagonService := service.NewWagonService(store, wagonCatalog, wagonClasses, wagonManager)
+	wagonService := service.NewWagonService(store, wagonCatalog, wagonClasses, wagonLevels, wagonManager)
 	h := &handler.Handlers{
 		Auth:         auth,
 		Profile:      service.NewProfileService(store, cfg.PointsNamespace),
@@ -176,6 +180,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/session/simulations", h.StartSimulation)
 		r.Post("/session/wagon/start", h.StartWagonSession)
 		r.Get("/wagon/classes", h.ListWagonClasses)
+		r.Get("/wagon/levels", h.ListWagonLevels)
 		r.Get("/session/simulations/{id}", h.GetSimulation)
 		r.Get("/session/simulations/{id}/result", h.SimulationResult)
 		r.Post("/session/simulations/{id}/actions", h.SimulationAction)

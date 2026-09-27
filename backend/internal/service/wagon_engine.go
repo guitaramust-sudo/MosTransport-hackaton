@@ -73,8 +73,11 @@ func AdvanceWagonMovements(state domain.WagonState, now time.Time) (domain.Wagon
 	return state, arrivals
 }
 
-// PickWagonSpawns considers idle seats only and caps the simultaneous cases.
-func PickWagonSpawns(state domain.WagonState, cfg content.WagonClassConfig, scenarios []content.Scenario, elapsed time.Duration, rng *rand.Rand) []WagonSpawnDecision {
+// PickWagonSpawns considers idle seats only, caps the simultaneous cases, and
+// samples eligible scenarios weighted by the active level's per-type weights:
+// first pick a scenario Type (weighted by level.TypeWeights), then pick
+// uniformly among eligible scenarios of that type. Deterministic given rng.
+func PickWagonSpawns(state domain.WagonState, cfg content.WagonClassConfig, level content.Level, scenarios []content.Scenario, elapsed time.Duration, rng *rand.Rand) []WagonSpawnDecision {
 	if cfg.SessionDurationS <= 0 || elapsed >= time.Duration(cfg.SessionDurationS)*time.Second || cfg.MaxConcurrentSituations <= 0 {
 		return nil
 	}
@@ -87,27 +90,44 @@ func PickWagonSpawns(state domain.WagonState, cfg content.WagonClassConfig, scen
 	if active >= cfg.MaxConcurrentSituations {
 		return nil
 	}
-	fraction := elapsed.Seconds() / float64(cfg.SessionDurationS)
-	poolIDs := map[string]bool{}
-	for _, id := range cfg.SituationPoolIDs {
-		poolIDs[id] = true
-	}
-	var eligible []content.Scenario
+	byType := map[string][]content.Scenario{}
 	for _, s := range scenarios {
-		if len(poolIDs) > 0 && !poolIDs[s.ID] {
-			continue
-		}
 		if s.ValidationStatus == "blocked" {
 			continue
 		}
-		if fraction >= cfg.PoolUnlock[wagonPool(s.Criticality)] {
-			eligible = append(eligible, s)
+		if level.TypeWeights[string(s.Type)] <= 0 {
+			continue
 		}
+		byType[string(s.Type)] = append(byType[string(s.Type)], s)
 	}
-	if len(eligible) == 0 {
+	if len(byType) == 0 {
 		return nil
 	}
-	sort.Slice(eligible, func(i, j int) bool { return eligible[i].ID < eligible[j].ID })
+	types := make([]string, 0, len(byType))
+	for t := range byType {
+		types = append(types, t)
+	}
+	sort.Strings(types) // map iteration order is random; sort so rng draws are reproducible
+	totalWeight := 0.0
+	for _, t := range types {
+		sort.Slice(byType[t], func(i, j int) bool { return byType[t][i].ID < byType[t][j].ID })
+		totalWeight += level.TypeWeights[t]
+	}
+
+	pickScenario := func() content.Scenario {
+		roll := rng.Float64() * totalWeight
+		for _, t := range types {
+			w := level.TypeWeights[t]
+			if roll < w {
+				pool := byType[t]
+				return pool[rng.Intn(len(pool))]
+			}
+			roll -= w
+		}
+		last := byType[types[len(types)-1]]
+		return last[rng.Intn(len(last))]
+	}
+
 	var decisions []WagonSpawnDecision
 	for i, seat := range state.Seats {
 		if active >= cfg.MaxConcurrentSituations {
@@ -116,7 +136,7 @@ func PickWagonSpawns(state domain.WagonState, cfg content.WagonClassConfig, scen
 		if seat.SituationID != nil || rng.Float64() >= cfg.SpawnProbability {
 			continue
 		}
-		chosen := eligible[rng.Intn(len(eligible))]
+		chosen := pickScenario()
 		decisions = append(decisions, WagonSpawnDecision{SeatIndex: i, ScenarioID: chosen.ID})
 		active++
 	}

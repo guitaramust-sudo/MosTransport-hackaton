@@ -10,20 +10,18 @@ import (
 var wagonClassFiles embed.FS
 
 type WagonClassConfig struct {
-	Status                  string             `json:"status,omitempty"`
-	Anchors                 []string           `json:"anchors,omitempty"`
-	RestrictedAnchors       []string           `json:"restricted_anchors,omitempty"`
-	SeatAnchors             []string           `json:"seat_anchors,omitempty"`
-	ServicePointAnchor      string             `json:"service_point_anchor,omitempty"`
-	SessionDurationS        int                `json:"session_duration_s,omitempty"`
-	TickS                   int                `json:"tick_s,omitempty"`
-	SpawnCheckIntervalS     int                `json:"spawn_check_interval_s,omitempty"`
-	SpawnProbability        float64            `json:"spawn_probability,omitempty"`
-	MaxConcurrentSituations int                `json:"max_concurrent_situations,omitempty"`
-	MoveDurationS           int                `json:"move_duration_s,omitempty"`
-	RedirectDurationS       int                `json:"redirect_duration_s,omitempty"`
-	PoolUnlock              map[string]float64 `json:"pool_unlock,omitempty"`
-	SituationPoolIDs        []string           `json:"situation_pool_ids,omitempty"`
+	Status                  string   `json:"status,omitempty"`
+	Anchors                 []string `json:"anchors,omitempty"`
+	RestrictedAnchors       []string `json:"restricted_anchors,omitempty"`
+	SeatAnchors             []string `json:"seat_anchors,omitempty"`
+	ServicePointAnchor      string   `json:"service_point_anchor,omitempty"`
+	SessionDurationS        int      `json:"session_duration_s,omitempty"`
+	TickS                   int      `json:"tick_s,omitempty"`
+	SpawnCheckIntervalS     int      `json:"spawn_check_interval_s,omitempty"`
+	SpawnProbability        float64  `json:"spawn_probability,omitempty"`
+	MaxConcurrentSituations int      `json:"max_concurrent_situations,omitempty"`
+	MoveDurationS           int      `json:"move_duration_s,omitempty"`
+	RedirectDurationS       int      `json:"redirect_duration_s,omitempty"`
 }
 
 type WagonClasses map[string]WagonClassConfig
@@ -36,29 +34,6 @@ func LoadWagonClasses() (WagonClasses, error) {
 	classes, err := ParseWagonClasses(raw)
 	if err != nil {
 		return nil, err
-	}
-	catalog, err := Load()
-	if err != nil {
-		return nil, err
-	}
-	known := map[string]bool{}
-	for _, s := range catalog.Scenarios {
-		known[s.ID] = true
-	}
-	for id, cfg := range classes {
-		if cfg.Status == "coming_soon" {
-			continue
-		}
-		seen := map[string]bool{}
-		for _, scenarioID := range cfg.SituationPoolIDs {
-			if !known[scenarioID] || seen[scenarioID] {
-				return nil, fmt.Errorf("wagon class %q: unknown or duplicate scenario %q", id, scenarioID)
-			}
-			seen[scenarioID] = true
-		}
-		if len(seen) == 0 {
-			return nil, fmt.Errorf("wagon class %q: empty scenario pool", id)
-		}
 	}
 	return classes, nil
 }
@@ -102,12 +77,6 @@ func ParseWagonClasses(raw []byte) (WagonClasses, error) {
 		}
 		if cfg.SpawnProbability < 0 || cfg.SpawnProbability > 1 {
 			return nil, fmt.Errorf("wagon class %q: spawn_probability must be in [0,1]", id)
-		}
-		for _, pool := range []string{"easy", "medium", "hard"} {
-			threshold, ok := cfg.PoolUnlock[pool]
-			if !ok || threshold < 0 || threshold > 1 {
-				return nil, fmt.Errorf("wagon class %q: invalid pool_unlock %q", id, pool)
-			}
 		}
 	}
 	return classes, nil

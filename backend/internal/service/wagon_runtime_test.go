@@ -18,10 +18,41 @@ type fakeWagonStore struct {
 	mu         sync.Mutex
 	sessions   map[uuid.UUID]domain.Session
 	situations map[uuid.UUID]domain.Situation
+	players    map[uuid.UUID]domain.Player
 }
 
 func newFakeWagonStore() *fakeWagonStore {
-	return &fakeWagonStore{sessions: map[uuid.UUID]domain.Session{}, situations: map[uuid.UUID]domain.Situation{}}
+	return &fakeWagonStore{sessions: map[uuid.UUID]domain.Session{}, situations: map[uuid.UUID]domain.Situation{}, players: map[uuid.UUID]domain.Player{}}
+}
+
+// GetPlayerByID returns a zero-progress player for any id not explicitly
+// seeded via players — tests that don't care about progression can start
+// sessions without registering a player first.
+func (f *fakeWagonStore) GetPlayerByID(_ context.Context, id uuid.UUID) (domain.Player, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p, ok := f.players[id]; ok {
+		return p, nil
+	}
+	return domain.Player{ID: id}, nil
+}
+
+// AdvanceWagonProgress mirrors the postgres implementation's sequential-only
+// guarantee: it only applies when newOrder is exactly one past the player's
+// current progress.
+func (f *fakeWagonStore) AdvanceWagonProgress(_ context.Context, playerID uuid.UUID, newOrder int) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.players[playerID]
+	if !ok {
+		p = domain.Player{ID: playerID}
+	}
+	if p.WagonProgress != newOrder-1 {
+		return false, nil
+	}
+	p.WagonProgress = newOrder
+	f.players[playerID] = p
+	return true, nil
 }
 func (f *fakeWagonStore) CreateWagonSession(_ context.Context, playerID uuid.UUID, state domain.WagonState) (domain.Session, error) {
 	f.mu.Lock()
@@ -145,7 +176,8 @@ func TestWagonRuntimeTickSpawnsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := &wagonRuntime{sessionID: sess.ID, store: f, catalog: catalog, cfg: content.WagonClassConfig{SessionDurationS: 100, MaxConcurrentSituations: 1, SpawnProbability: 1, PoolUnlock: map[string]float64{"easy": 0}}, state: state, rng: rand.New(rand.NewSource(1))}
+	level := content.Level{TypeWeights: map[string]float64{string(content.TypeService): 1}}
+	rt := &wagonRuntime{sessionID: sess.ID, store: f, catalog: catalog, cfg: content.WagonClassConfig{SessionDurationS: 100, MaxConcurrentSituations: 1, SpawnProbability: 1}, level: level, state: state, rng: rand.New(rand.NewSource(1))}
 	rt.tick(time.Now())
 	got, err := f.GetSession(context.Background(), sess.ID)
 	if err != nil || got.WagonState.Seats[0].SituationID == nil {

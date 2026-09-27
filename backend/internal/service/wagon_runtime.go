@@ -27,6 +27,8 @@ type wagonStore interface {
 	CompleteWagonPhysicalAction(context.Context, uuid.UUID, uuid.UUID, domain.WagonState) error
 	RecordRestrictedArrival(context.Context, uuid.UUID) error
 	GetSession(context.Context, uuid.UUID) (domain.Session, error)
+	GetPlayerByID(context.Context, uuid.UUID) (domain.Player, error)
+	AdvanceWagonProgress(context.Context, uuid.UUID, int) (bool, error)
 }
 
 type wagonCommand struct {
@@ -42,21 +44,34 @@ func NewWagonCommand(kind, item, anchor string, situationID uuid.UUID) wagonComm
 type WagonManager struct {
 	store    wagonStore
 	catalog  content.Catalog
+	levels   content.Levels
 	mu       sync.Mutex
 	runtimes map[uuid.UUID]*wagonRuntime
 }
 
-func NewWagonManager(store wagonStore, catalog content.Catalog) *WagonManager {
-	return &WagonManager{store: store, catalog: catalog, runtimes: map[uuid.UUID]*wagonRuntime{}}
+func NewWagonManager(store wagonStore, catalog content.Catalog, levels content.Levels) *WagonManager {
+	return &WagonManager{store: store, catalog: catalog, levels: levels, runtimes: map[uuid.UUID]*wagonRuntime{}}
 }
 
-func (m *WagonManager) Start(sessionID uuid.UUID, cfg content.WagonClassConfig, state domain.WagonState) {
+// levelByID looks up a level by ID. content.Levels has no such helper (it's a
+// plain slice), and a method can't be added to it from outside package
+// content, so this is a package-local function instead.
+func levelByID(levels content.Levels, id string) (content.Level, bool) {
+	for _, lvl := range levels {
+		if lvl.ID == id {
+			return lvl, true
+		}
+	}
+	return content.Level{}, false
+}
+
+func (m *WagonManager) Start(sessionID uuid.UUID, cfg content.WagonClassConfig, level content.Level, state domain.WagonState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.runtimes[sessionID]; exists {
 		return
 	}
-	rt := &wagonRuntime{sessionID: sessionID, store: m.store, catalog: m.catalog, cfg: cfg, state: state,
+	rt := &wagonRuntime{sessionID: sessionID, store: m.store, catalog: m.catalog, cfg: cfg, level: level, state: state,
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())), commands: make(chan wagonCommand), attach: make(chan wagonAttach), detach: make(chan *websocket.Conn), stop: make(chan struct{}), done: make(chan struct{})}
 	m.runtimes[sessionID] = rt
 	go rt.loop()
@@ -76,7 +91,12 @@ func (m *WagonManager) Recover(ctx context.Context, classes content.WagonClasses
 		if !ok || cfg.Status == "coming_soon" {
 			continue
 		}
-		m.Start(sess.ID, cfg, *sess.WagonState)
+		level, ok := levelByID(m.levels, sess.WagonState.LevelID)
+		if !ok {
+			slog.Error("wagon recover: level not found", "session_id", sess.ID, "level_id", sess.WagonState.LevelID)
+			continue
+		}
+		m.Start(sess.ID, cfg, level, *sess.WagonState)
 	}
 	return nil
 }
@@ -173,6 +193,7 @@ type wagonRuntime struct {
 	store     wagonStore
 	catalog   content.Catalog
 	cfg       content.WagonClassConfig
+	level     content.Level
 	state     domain.WagonState
 	rng       *rand.Rand
 	conn      *websocket.Conn
@@ -321,7 +342,7 @@ func (rt *wagonRuntime) tick(now time.Time) {
 	if rt.lastSpawn.IsZero() || now.Sub(rt.lastSpawn) >= interval {
 		rt.lastSpawn = now
 		elapsed := now.Sub(rt.state.StartedAt)
-		for _, decision := range PickWagonSpawns(rt.state, rt.cfg, rt.catalog.Scenarios, elapsed, rt.rng) {
+		for _, decision := range PickWagonSpawns(rt.state, rt.cfg, rt.level, rt.catalog.Scenarios, elapsed, rt.rng) {
 			rt.spawn(now, decision)
 		}
 	}

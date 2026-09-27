@@ -13,13 +13,13 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
-const playerColumns = `id, email, username, password_hash, role, display_name, source_system, external_user_id, assigned_class_ids, depot_id, brigade_id, total_xp, created_at`
+const playerColumns = `id, email, username, password_hash, role, display_name, source_system, external_user_id, assigned_class_ids, depot_id, brigade_id, total_xp, created_at, wagon_progress`
 
 func scanPlayer(p *domain.Player) []any {
 	return []any{
 		&p.ID, &p.Email, &p.Username, &p.PasswordHash, &p.Role,
 		&p.DisplayName, &p.SourceSystem, &p.ExternalUserID, &p.AssignedClassIDs,
-		&p.DepotID, &p.BrigadeID, &p.TotalXP, &p.CreatedAt,
+		&p.DepotID, &p.BrigadeID, &p.TotalXP, &p.CreatedAt, &p.WagonProgress,
 	}
 }
 
@@ -59,6 +59,21 @@ func (s *Store) AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) erro
 	_, err := s.pool.Exec(ctx,
 		`UPDATE players SET total_xp = total_xp + $2 WHERE id = $1`, playerID, xp)
 	return err
+}
+
+// AdvanceWagonProgress bumps the player's wagon_progress to newOrder, but
+// only if their current progress is exactly newOrder-1 — i.e. only a
+// strictly sequential advance is ever applied. Returns whether it advanced
+// (false means either the player was already past this point, or this
+// would have skipped a level — both are no-ops, not errors).
+func (s *Store) AdvanceWagonProgress(ctx context.Context, playerID uuid.UUID, newOrder int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE players SET wagon_progress = $2 WHERE id = $1 AND wagon_progress = $2 - 1`,
+		playerID, newOrder)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 func (s *Store) AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp, evidence int) error {

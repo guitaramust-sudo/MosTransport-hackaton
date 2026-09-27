@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -155,6 +156,13 @@ func (h *Handlers) FinishSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.WagonManager != nil {
 		h.WagonManager.Stop(id)
+	}
+	if h.Wagon != nil {
+		if sess, getErr := h.Wagon.GetOwnedSession(r.Context(), playerID, id); getErr == nil {
+			if err := h.Wagon.AdvanceIfPassed(r.Context(), sess); err != nil {
+				slog.Error("wagon progress advance failed", "session_id", id, "error", err)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, breakdown)
 }

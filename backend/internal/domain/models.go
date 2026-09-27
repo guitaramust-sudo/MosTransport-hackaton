@@ -20,6 +20,7 @@ type Player struct {
 	DepotID          *string   `json:"depot_id,omitempty"`
 	BrigadeID        *string   `json:"brigade_id,omitempty"`
 	TotalXP          int       `json:"total_xp"`
+	WagonProgress    int       `json:"wagon_progress"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 

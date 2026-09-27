@@ -40,6 +40,10 @@ func TestWagonWebSocketEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	levels, err := content.LoadLevels()
+	if err != nil {
+		t.Fatal(err)
+	}
 	auth := service.NewAuthService(store, "wagon-ws-test-secret", time.Hour, time.Hour)
 	register := func() (uuid.UUID, string) {
 		result, err := auth.Register(ctx, fmt.Sprintf("ws-%s@example.invalid", uuid.NewString()), "ws-test", "testpass123")
@@ -57,12 +61,12 @@ func TestWagonWebSocketEndToEnd(t *testing.T) {
 	}
 	_, token := register()
 	_, foreignToken := register()
-	mgr := service.NewWagonManager(store, catalog)
+	mgr := service.NewWagonManager(store, catalog, levels)
 	defer mgr.StopAll()
-	h := &handler.Handlers{Auth: auth, Wagon: service.NewWagonService(store, catalog, classes, mgr), WagonManager: mgr, WagonClasses: classes}
+	h := &handler.Handlers{Auth: auth, Wagon: service.NewWagonService(store, catalog, classes, levels, mgr), WagonManager: mgr, WagonClasses: classes}
 	server := httptest.NewServer(routes(h, auth, store))
 	defer server.Close()
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/session/wagon/start", strings.NewReader(`{"class_id":"standard"}`))
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/session/wagon/start", strings.NewReader(`{"level_id":"orientation"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

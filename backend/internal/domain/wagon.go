@@ -9,6 +9,7 @@ import (
 // WagonState stores symbolic positions and timing for a live wagon shift.
 type WagonState struct {
 	ClassID           string      `json:"class_id"`
+	LevelID           string      `json:"level_id"`
 	RestrictedAnchors []string    `json:"restricted_anchors"`
 	Seats             []WagonSeat `json:"seats"`
 	Player            WagonActor  `json:"player"`

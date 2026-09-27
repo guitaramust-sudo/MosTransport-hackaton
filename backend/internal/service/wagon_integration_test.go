@@ -41,12 +41,13 @@ func TestWagonSessionEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := content.WagonClassConfig{Anchors: []string{"seat_1", "service_point"}, SeatAnchors: []string{"seat_1"}, ServicePointAnchor: "service_point",
-		SessionDurationS: 60, TickS: 1, SpawnCheckIntervalS: 3600, SpawnProbability: 1, MaxConcurrentSituations: 1, MoveDurationS: 1,
-		PoolUnlock: map[string]float64{"easy": 0, "medium": 0.35, "hard": 0.7}, SituationPoolIDs: []string{"cold"}}
+		SessionDurationS: 60, TickS: 1, SpawnCheckIntervalS: 3600, SpawnProbability: 1, MaxConcurrentSituations: 1, MoveDurationS: 1}
 	classes := content.WagonClasses{"standard": cfg}
-	mgr := NewWagonManager(store, catalog)
-	svc := NewWagonService(store, catalog, classes, mgr)
-	sess, err := svc.StartSession(ctx, player.ID, "standard")
+	levels := content.Levels{{ID: "test_level", Order: 1, ClassID: "standard", Title: "T", Intro: "I",
+		TypeWeights: map[string]float64{string(content.TypeService): 1}}}
+	mgr := NewWagonManager(store, catalog, levels)
+	svc := NewWagonService(store, catalog, classes, levels, mgr)
+	sess, err := svc.StartSession(ctx, player.ID, "test_level")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestWagonSessionEndToEnd(t *testing.T) {
 		t.Fatal("cold situation did not spawn")
 	}
 	mgr.Stop(sess.ID)
-	recovered := NewWagonManager(store, catalog)
+	recovered := NewWagonManager(store, catalog, levels)
 	if err := recovered.Recover(ctx, classes); err != nil {
 		t.Fatal(err)
 	}

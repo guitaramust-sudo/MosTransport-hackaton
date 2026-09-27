@@ -58,6 +58,7 @@ type Store interface {
 	GetPlayerByEmail(ctx context.Context, email string) (domain.Player, error)
 	GetPlayerByID(ctx context.Context, id uuid.UUID) (domain.Player, error)
 	AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) error
+	AdvanceWagonProgress(ctx context.Context, playerID uuid.UUID, newOrder int) (bool, error)
 	AddCompetencyXP(ctx context.Context, playerID uuid.UUID, competencyCode string, xp, evidence int) error
 	ListCompetencies(ctx context.Context) ([]domain.Competency, error)
 	GetPlayerCompetencies(ctx context.Context, playerID uuid.UUID) ([]domain.PlayerCompetency, error)
