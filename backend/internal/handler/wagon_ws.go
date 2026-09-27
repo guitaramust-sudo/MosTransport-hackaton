@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -17,6 +18,9 @@ var wagonUpgrader = websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 10
 func wagonOriginAllowed(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
+		return true
+	}
+	if parsed, err := url.Parse(origin); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == r.Host {
 		return true
 	}
 	allowed := os.Getenv("CORS_ORIGINS")

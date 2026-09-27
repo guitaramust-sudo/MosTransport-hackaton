@@ -24,6 +24,7 @@ type wagonStore interface {
 	GetSituation(context.Context, uuid.UUID) (domain.Situation, error)
 	ListSituationsBySession(context.Context, uuid.UUID) ([]domain.Situation, error)
 	SetPhysicalActionDone(context.Context, uuid.UUID) error
+	CompleteWagonPhysicalAction(context.Context, uuid.UUID, uuid.UUID, domain.WagonState) error
 	RecordRestrictedArrival(context.Context, uuid.UUID) error
 	GetSession(context.Context, uuid.UUID) (domain.Session, error)
 }
@@ -268,9 +269,11 @@ func (rt *wagonRuntime) handle(now time.Time, cmd wagonCommand) error {
 		if err != nil {
 			return err
 		}
-		if err = rt.store.SetPhysicalActionDone(context.Background(), cmd.situationID); err != nil {
+		if err = rt.store.CompleteWagonPhysicalAction(context.Background(), rt.sessionID, cmd.situationID, next); err != nil {
 			return err
 		}
+		rt.state = next
+		return nil
 	default:
 		return ErrInvalidWagonAction
 	}

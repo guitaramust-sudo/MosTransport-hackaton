@@ -90,6 +90,24 @@ func (f *fakeWagonStore) SetPhysicalActionDone(_ context.Context, id uuid.UUID) 
 	f.situations[id] = s
 	return nil
 }
+
+func (f *fakeWagonStore) CompleteWagonPhysicalAction(_ context.Context, sessionID, situationID uuid.UUID, state domain.WagonState) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[sessionID]
+	if !ok || sess.Status != domain.SessionStatusActive {
+		return repo.ErrConflict
+	}
+	sit, ok := f.situations[situationID]
+	if !ok || sit.SessionID != sessionID || sit.Status != domain.SituationStatusActive || sit.PhysicalActionDone {
+		return repo.ErrConflict
+	}
+	sit.PhysicalActionDone = true
+	f.situations[situationID] = sit
+	sess.WagonState = &state
+	f.sessions[sessionID] = sess
+	return nil
+}
 func (f *fakeWagonStore) RecordRestrictedArrival(_ context.Context, id uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

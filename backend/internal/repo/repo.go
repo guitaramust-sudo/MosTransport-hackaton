@@ -89,6 +89,7 @@ type Store interface {
 	// Situations
 	CreateSituation(ctx context.Context, s domain.Situation) (domain.Situation, error)
 	SetPhysicalActionDone(ctx context.Context, situationID uuid.UUID) error
+	CompleteWagonPhysicalAction(ctx context.Context, sessionID, situationID uuid.UUID, state domain.WagonState) error
 	RecordRestrictedArrival(ctx context.Context, situationID uuid.UUID) error
 	GetSituation(ctx context.Context, id uuid.UUID) (domain.Situation, error)
 	ListSituationsBySession(ctx context.Context, sessionID uuid.UUID) ([]domain.Situation, error)

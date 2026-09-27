@@ -1,12 +1,14 @@
 # VSM-400 Conductor Trainer — API Contract
 
-Полный контракт **реально реализованного** backend-API (по коду на 26.09.2026).
+Контракт **реально реализованного** backend-API (по коду на 27.09.2026).
+Новый WebSocket-режим вагона описан отдельно в [WAGON_API.md](WAGON_API.md).
 Не путать с `VSM_API_DATA_CONTRACT.md` — тот файл является проектным handoff'ом
 желаемого контракта; здесь — фактические маршруты, поля и формы ответов.
 
 - Base URL: `http://localhost:8088` (docker) / `http://localhost:8080` (локально)
 - Формат: `application/json; charset=utf-8`
-- Аутентификация: заголовок `Authorization: Bearer <access_token>`
+- Аутентификация HTTP: заголовок `Authorization: Bearer <access_token>`;
+  WebSocket вагона принимает тот же JWT в query-параметре `token`.
 - Роли: `user` (по умолчанию), `admin` (создаётся локальной командой `bootstrap-admin`)
 
 ---
@@ -86,7 +88,8 @@
 ```
 
 `pending_situations` — очередь scenario-id, которые ещё не разыграны (ситуации
-появляются последовательно, см. §5).
+появляются последовательно в старом режиме). Для вагонной смены вместо очереди
+есть объект `wagon_state` с классом, местами, позициями и игровым временем.
 
 ### Situation (DTO)
 
@@ -105,6 +108,9 @@
   "loyalty": 50,
   "safety": 50,
   "timer_deadline": "2026-09-26T15:01:00Z",
+  "seat_anchor": "seat_1",
+  "physical_requirement": { "kind": "deliver_item", "item": "blanket" },
+  "physical_action_done": false,
   "outcome": "success",              // только после закрытия: success | partial | fail | timeout | unfinished
   "escalations": ["train_chief"],
   "xp": 20,                          // XP ситуации, после закрытия
@@ -119,6 +125,8 @@
 Поля `outcome`, `xp`, `remarks`, `score_result`, `tone`, `conveyed`, `missed`
 появляются после закрытия ситуации. `loyalty`/`safety` обновляются только при
 закрытии (в диалоге стоят 50/50).
+`seat_anchor` и `physical_requirement` присутствуют только у вагонных
+ситуаций; `physical_action_done` подтверждает действие на сервере.
 
 ### Message
 
@@ -569,7 +577,7 @@
 | escalation target | `train_chief`, `ptb`, `police`, `medic`, `ambulance` |
 | leaderboard scope | `company`, `depot`, `brigade` |
 | competency status | `insufficient`, `provisional`, `assessed` |
-| remark codes | `fast`, `on_time`, `timeout`, `escalation_ok`, `no_escalation`, `false_escalation`, `wrong_target`, `empathic`, `rude`, `missed_point`, `solved` |
+| remark codes | `fast`, `on_time`, `timeout`, `escalation_ok`, `no_escalation`, `false_escalation`, `wrong_target`, `empathic`, `rude`, `missed_point`, `solved`, `restricted_reached` |
 
 ---
 
@@ -602,7 +610,7 @@
 
 ## 11. Примечания к модели
 
-1. **Ситуации генерируются последовательно**: `start` создаёт одну ситуацию,
+1. **В старом режиме ситуации генерируются последовательно**: `start` создаёт одну ситуацию,
    следующая появляется после закрытия предыдущей (очередь в
    `session.pending_situations`). Фронту нужно перезапрашивать `GET /session/{id}`
    после закрытия ситуации.
@@ -611,4 +619,7 @@
 3. **Две шкалы** (`loyalty`/`safety`) стартуют 50/50 и фиксируются при закрытии.
 4. **Компетенции** соответствуют типам ситуаций; `score` — накопленный XP (может
    быть отрицательным), `status` — `insufficient`/`provisional`.
-5. **Рейтинг** = накопленный `total_xp` (правило GDD v1.0).
+5. **Рейтинг** берёт зачтённые очки из `points_ledger`; XP хранится отдельно.
+6. **Вагон** создаёт ситуации на свободных местах параллельно. Их движение и
+   физические действия идут через WebSocket; диалог и закрытие остаются REST.
+   Поля и команды приведены в [WAGON_API.md](WAGON_API.md).

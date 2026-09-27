@@ -285,6 +285,45 @@ func (s *Store) SetPhysicalActionDone(ctx context.Context, situationID uuid.UUID
 	return nil
 }
 
+// CompleteWagonPhysicalAction records the physical proof and inventory/actor
+// change together. A failed or expired situation cannot consume an item.
+func (s *Store) CompleteWagonPhysicalAction(ctx context.Context, sessionID, situationID uuid.UUID, state domain.WagonState) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var sessionStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM sessions WHERE id = $1 AND wagon_state IS NOT NULL FOR UPDATE`, sessionID).Scan(&sessionStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return repo.ErrNotFound
+		}
+		return err
+	}
+	if sessionStatus != domain.SessionStatusActive {
+		return repo.ErrConflict
+	}
+	var situationStatus string
+	var done bool
+	var deadline *time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, physical_action_done, timer_deadline FROM situations WHERE id = $1 AND session_id = $2 FOR UPDATE`, situationID, sessionID).Scan(&situationStatus, &done, &deadline); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return repo.ErrNotFound
+		}
+		return err
+	}
+	if situationStatus != domain.SituationStatusActive || done || (deadline != nil && !time.Now().Before(*deadline)) {
+		return repo.ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE situations SET physical_action_done = true WHERE id = $1`, situationID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE sessions SET wagon_state = $2 WHERE id = $1`, sessionID, state); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) RecordRestrictedArrival(ctx context.Context, situationID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE situations SET passenger_params = jsonb_set(passenger_params, '{restricted_reached}', 'true'::jsonb, true) WHERE id = $1 AND status = 'active'`, situationID)
 	if err != nil {

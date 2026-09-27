@@ -36,6 +36,11 @@ func (s *SessionService) Start(ctx context.Context, playerID uuid.UUID) (*domain
 	}
 	pool := make([]content.Scenario, 0, len(s.catalog.Scenarios))
 	for _, scenario := range s.catalog.Scenarios {
+		// The legacy dialogue shift has no movement or item commands. Keep
+		// wagon-only physical cases in the wagon flow where they are solvable.
+		if scenario.PhysicalRequirement != nil {
+			continue
+		}
 		if scenario.ValidationStatus == "approved" || (s.pointsNamespace == "demo" && scenario.ValidationStatus == "draft") {
 			pool = append(pool, scenario)
 		}

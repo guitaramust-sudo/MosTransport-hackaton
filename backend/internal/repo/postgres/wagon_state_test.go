@@ -60,3 +60,35 @@ func TestSituationPhysicalRequirementRoundTrips(t *testing.T) {
 		t.Fatalf("physical action: %+v, %v", reloaded, err)
 	}
 }
+
+func TestCompleteWagonPhysicalActionIsAtomic(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	state := domain.WagonState{ClassID: "standard", CarriedItems: []string{"blanket"}, Player: domain.WagonActor{At: "seat_1"}}
+	sess, err := store.CreateWagonSession(ctx, playerID, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sit := draftSituation(time.Now().Add(time.Hour))
+	sit.SessionID = sess.ID
+	created, err := store.CreateSituation(ctx, sit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.CarriedItems = nil
+	if err := store.CompleteWagonPhysicalAction(ctx, sess.ID, created.ID, state); err != nil {
+		t.Fatal(err)
+	}
+	state.CarriedItems = []string{"water"}
+	if err := store.CompleteWagonPhysicalAction(ctx, sess.ID, created.ID, state); err == nil {
+		t.Fatal("second completion accepted")
+	}
+	reloaded, err := store.GetSession(ctx, sess.ID)
+	if err != nil || len(reloaded.WagonState.CarriedItems) != 0 {
+		t.Fatalf("state changed after conflict: %+v %v", reloaded.WagonState, err)
+	}
+	physical, err := store.GetSituation(ctx, created.ID)
+	if err != nil || !physical.PhysicalActionDone {
+		t.Fatalf("physical proof not saved: %+v %v", physical, err)
+	}
+}
