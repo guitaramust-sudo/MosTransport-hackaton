@@ -40,6 +40,19 @@ func TestWagonSessionEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This flow exercises blanket delivery, so keep the spawn deterministic
+	// when the production catalog gains other service scenarios.
+	var cold content.Scenario
+	for _, scenario := range catalog.Scenarios {
+		if scenario.ID == "cold" {
+			cold = scenario
+			break
+		}
+	}
+	if cold.ID == "" {
+		t.Fatal("cold scenario missing from catalog")
+	}
+	catalog.Scenarios = []content.Scenario{cold}
 	cfg := content.WagonClassConfig{Anchors: []string{"seat_1", "service_point"}, SeatAnchors: []string{"seat_1"}, ServicePointAnchor: "service_point",
 		SessionDurationS: 60, TickS: 1, SpawnCheckIntervalS: 3600, SpawnProbability: 1, MaxConcurrentSituations: 1, MoveDurationS: 1}
 	classes := content.WagonClasses{"standard": cfg}
