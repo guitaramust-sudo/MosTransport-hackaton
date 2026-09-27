@@ -24,7 +24,7 @@ export function HomePage() {
   useEffect(() => { if (profile.data) dispatch(setPlayer(profile.data.player)) }, [dispatch, profile.data])
 
   const name = auth?.player.username ?? 'проводник'
-  const xp = profile.data?.player.total_xp ?? auth?.player.total_xp ?? 0
+  const xp = Math.max(0, profile.data?.player.total_xp ?? auth?.player.total_xp ?? 0)
   const points = profile.data?.leaderboard_points_total ?? 0
   const { level, inLevel, percent } = levelProgress(xp, profile.data?.level)
 

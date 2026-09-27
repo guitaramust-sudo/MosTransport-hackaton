@@ -69,7 +69,7 @@ func (s *Store) scanPlayer(ctx context.Context, q string, args ...any) (domain.P
 
 func (s *Store) AddTotalXP(ctx context.Context, playerID uuid.UUID, xp int) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE players SET total_xp = total_xp + $2 WHERE id = $1`, playerID, xp)
+		`UPDATE players SET total_xp = GREATEST(0, total_xp + $2) WHERE id = $1`, playerID, xp)
 	return err
 }
 

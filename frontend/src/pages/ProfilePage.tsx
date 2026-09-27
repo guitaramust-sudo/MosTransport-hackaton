@@ -26,7 +26,7 @@ export function ProfilePage() {
   const [ratingOpen, setRatingOpen] = useState(false)
 
   const player = profile.data?.player ?? auth?.player
-  const xp = player?.total_xp ?? 0
+  const xp = Math.max(0, player?.total_xp ?? 0)
   const { level, toNext, percent } = levelProgress(xp, profile.data?.level)
   const earned = new Set(profile.data?.achievements ?? [])
   const points = profile.data?.leaderboard_points_total ?? 0

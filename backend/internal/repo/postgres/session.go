@@ -128,7 +128,7 @@ func (s *Store) FinishSessionAndAwardXP(ctx context.Context, sessionID, playerID
 	if err != nil {
 		return false, err
 	}
-	result, err := tx.Exec(ctx, `UPDATE players SET total_xp = total_xp + $2 WHERE id = $1`, playerID, xp)
+	result, err := tx.Exec(ctx, `UPDATE players SET total_xp = GREATEST(0, total_xp + $2) WHERE id = $1`, playerID, xp)
 	if err != nil {
 		return false, err
 	}

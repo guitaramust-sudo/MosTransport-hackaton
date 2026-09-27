@@ -106,6 +106,23 @@ func TestFinishAwardsXPAndCompetenciesAtomically(t *testing.T) {
 	}
 }
 
+func TestNegativeShiftXPStopsAtZero(t *testing.T) {
+	store, playerID := integrationStore(t)
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awarded, err := store.FinishSessionAndAwardXP(ctx, session.ID, playerID, -20, nil, 0, 0, time.Now())
+	if err != nil || !awarded {
+		t.Fatalf("finish with penalty: awarded=%v, err=%v", awarded, err)
+	}
+	player, err := store.GetPlayerByID(ctx, playerID)
+	if err != nil || player.TotalXP != 0 {
+		t.Fatalf("total XP below zero: %+v, %v", player, err)
+	}
+}
+
 func TestConcurrentSpawnCreatesOnlyOneSituation(t *testing.T) {
 	store, playerID := integrationStore(t)
 	ctx := context.Background()
