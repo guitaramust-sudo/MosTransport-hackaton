@@ -130,10 +130,16 @@ func (m *WagonManager) Recover(ctx context.Context, classes content.WagonClasses
 		if !ok || cfg.Status == "coming_soon" {
 			continue
 		}
-		level, ok := levelByID(m.levels, sess.WagonState.LevelID)
-		if !ok {
-			slog.Error("wagon recover: level not found", "session_id", sess.ID, "level_id", sess.WagonState.LevelID)
-			continue
+		// Lesson practice sessions have no level ID and intentionally do not
+		// spawn additional random situations after their scripted events.
+		var level content.Level
+		if sess.WagonState.LevelID != "" {
+			var ok bool
+			level, ok = levelByID(m.levels, sess.WagonState.LevelID)
+			if !ok {
+				slog.Error("wagon recover: level not found", "session_id", sess.ID, "level_id", sess.WagonState.LevelID)
+				continue
+			}
 		}
 		m.Start(sess.ID, cfg, level, *sess.WagonState)
 	}

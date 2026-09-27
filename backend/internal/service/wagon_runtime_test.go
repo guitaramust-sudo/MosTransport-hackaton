@@ -193,6 +193,28 @@ func TestWagonRuntimeTickSpawnsAndPersists(t *testing.T) {
 	}
 }
 
+func TestWagonManagerRecoverLessonPractice(t *testing.T) {
+	store := newFakeWagonStore()
+	state := domain.WagonState{
+		ClassID: "first", StartedAt: time.Now(), DurationS: 480,
+		Seats: []domain.WagonSeat{{Anchor: "seat_1", PassengerDefID: "p1", Actor: domain.WagonActor{At: "seat_1"}}},
+	}
+	session, err := store.CreateWagonSession(context.Background(), uuid.New(), state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWagonManager(store, testWagonCatalog(), nil)
+	classes := content.WagonClasses{"first": {TickS: 3600}}
+	if err := manager.Recover(context.Background(), classes); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.StopAll()
+	runtime := manager.runtime(session.ID)
+	if runtime == nil || runtime.level.ID != "" || len(runtime.state.Seats) != 1 {
+		t.Fatalf("lesson practice was not recovered: %+v", runtime)
+	}
+}
+
 // TestWagonManagerStartScriptedSeedsMandatoryScenarioAndStaysQuiet exercises
 // StartScripted: it must seed the given scenario onto the first idle seat
 // eagerly (not via PickWagonSpawns's probability roll), and — given an empty
