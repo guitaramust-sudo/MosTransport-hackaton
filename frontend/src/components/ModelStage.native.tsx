@@ -5,6 +5,7 @@ import { Canvas } from '@react-three/fiber/native'
 import { Bounds, OrbitControls } from '@react-three/drei/native'
 import { colors, radius } from '../helpers/theme'
 import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
+import { WagonBlanket } from './WagonBlanket'
 
 function WagonModel() {
   const scene = useNativeWagonScene()
@@ -36,6 +37,7 @@ export function ModelStage() {
           <directionalLight position={[-4, 3, -4]} intensity={1.2} />
           <Bounds fit clip observe margin={1.25}>
             <WagonModel />
+            <WagonBlanket />
           </Bounds>
           <OrbitControls enablePan={false} minDistance={2} maxDistance={18} />
         </Canvas>

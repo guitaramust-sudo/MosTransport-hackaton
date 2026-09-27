@@ -5,6 +5,7 @@ import { Canvas } from '@react-three/fiber'
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
 import type { Group } from 'three'
 import { colors, radius } from '../helpers/theme'
+import { WagonBlanket } from './WagonBlanket'
 
 const modelAsset = require('../../assets/models/TOOOPblend.glb')
 
@@ -38,6 +39,7 @@ export function ModelStage() {
           <directionalLight position={[-4, 3, -4]} intensity={1.2} />
           <Bounds fit clip observe margin={1.25}>
             <WagonModel />
+            <WagonBlanket />
           </Bounds>
           <OrbitControls enablePan={false} minDistance={2} maxDistance={18} />
         </Canvas>

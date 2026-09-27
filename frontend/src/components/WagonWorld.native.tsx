@@ -9,6 +9,7 @@ import { colors } from '../helpers/theme'
 import { interpolateWagonActor, wagonAnchorPositions, wagonSituationIcon } from '../helpers/wagonMap'
 import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnapshot } from '../types'
 import { Text } from './Typography'
+import { WagonBlanket } from './WagonBlanket'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -217,6 +218,7 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <ambientLight intensity={2.1} />
       <directionalLight position={[4, 9, -2]} intensity={2.5} />
       <primitive object={wagonScene} />
+      <WagonBlanket onPress={() => { if (!disabled) onAnchorPress('service_point') }} />
       <mesh
         position={[AISLE_X, FLOOR_Y + 0.012, 0]}
         rotation={[-Math.PI / 2, 0, 0]}

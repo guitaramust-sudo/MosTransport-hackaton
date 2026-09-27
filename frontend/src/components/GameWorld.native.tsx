@@ -8,6 +8,7 @@ import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
 import { colors } from '../helpers/theme'
 import type { GameQuest } from '../types'
 import { Text } from './Typography'
+import { WagonBlanket } from './WagonBlanket'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -205,6 +206,7 @@ function World({ targetEventId, targetSeatIndex, moveRequest, onArrive, playerPo
   return (
     <group>
       <primitive object={wagonScene} />
+      <WagonBlanket />
       <group ref={character}>
         <primitive object={conductor.scene} />
       </group>
