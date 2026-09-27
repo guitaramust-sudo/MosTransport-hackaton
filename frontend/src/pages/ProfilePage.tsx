@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { StyleSheet, Switch, View } from 'react-native'
 import { api } from '../api/client'
 import { navigate, openLesson, signedOut, useAppDispatch, useAppSelector } from '../app/store'
 import { badgeTitles } from '../assets/badges'
@@ -11,6 +11,7 @@ import { Text } from '../components/Typography'
 import { Avatar, Badge, Medal, Button, Card, ErrorText, ListRow, ProgressBar, Screen, Section, SpeedLine } from '../components/UI'
 import { achievements, lessonBadge } from '../helpers/achievements'
 import { levelProgress } from '../helpers/progression'
+import { useMusicSettings } from '../helpers/musicSettings'
 import { registerForPushNotifications } from '../helpers/pushNotifications'
 import { colors, radius, spacing, type } from '../helpers/theme'
 
@@ -24,6 +25,7 @@ export function ProfilePage() {
   const auth = useAppSelector((state) => state.app.auth)
   const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile })
   const [ratingOpen, setRatingOpen] = useState(false)
+  const { enabled: musicEnabled, ready: musicReady, setEnabled: setMusicEnabled } = useMusicSettings()
 
   const player = profile.data?.player ?? auth?.player
   const xp = Math.max(0, player?.total_xp ?? 0)
@@ -154,10 +156,24 @@ export function ProfilePage() {
         </Card>
       </Section>
 
+      <Section title="Настройки">
+        <Card style={styles.compact}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingIcon}><Icon name="settings" size={22} color={colors.action} /></View>
+            <View style={styles.settingText}>
+              <Text style={styles.settingTitle}>Фоновая музыка</Text>
+              <Text style={styles.settingCaption}>Тихая музыка в 3D вагоне</Text>
+            </View>
+            <Switch accessibilityLabel="Фоновая музыка в 3D вагоне" value={musicEnabled} disabled={!musicReady}
+              onValueChange={setMusicEnabled} trackColor={{ false: colors.border, true: colors.primary }} />
+          </View>
+          <ListRow icon="bell" title="Push-уведомления"
+            caption={pushBusy ? 'Подключаем…' : pushStatus ?? 'О новых уроках и сгорании призовых очков'}
+            onPress={pushBusy ? undefined : () => void enablePush()} />
+        </Card>
+      </Section>
+
       <Card style={[styles.compact, { marginTop: spacing.lg }]}>
-        <ListRow icon="bell" title="Push-уведомления"
-          caption={pushBusy ? 'Подключаем…' : pushStatus ?? 'О новых уроках и сгорании призовых очков'}
-          onPress={pushBusy ? undefined : () => void enablePush()} />
         {player?.role === 'admin' && (
           <ListRow icon="admin" title="Админ-консоль" caption="Учётные записи и учебные итоги" onPress={() => dispatch(navigate('admin'))} />
         )}
@@ -185,6 +201,11 @@ const styles = StyleSheet.create({
   xpValue: { ...type.h3, color: colors.ink, marginTop: 2 },
   levelCaption: { ...type.secondary, color: colors.secondary, marginTop: spacing.sm },
   compact: { paddingVertical: 4, paddingHorizontal: 16 },
+  settingRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: 10, paddingVertical: 8 },
+  settingIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSoft },
+  settingText: { flex: 1 },
+  settingTitle: { ...type.secondary, fontWeight: '600', color: colors.ink },
+  settingCaption: { ...type.label, color: colors.secondary, marginTop: 2 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   prizeTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   prizeOf: { fontSize: 20, color: colors.muted },

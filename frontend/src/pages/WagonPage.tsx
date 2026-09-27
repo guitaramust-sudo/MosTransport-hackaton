@@ -9,6 +9,7 @@ import { Text, TextInput } from '../components/Typography'
 import { WagonWorld } from '../components/WagonWorld'
 import { colors, radius, shadow } from '../helpers/theme'
 import { translateBackendField, translateBackendText } from '../helpers/backendTranslations'
+import { useMusicSettings } from '../helpers/musicSettings'
 import { objectsAtAnchor, pointsOfInterestFor, servicePointFor, wagonAnchorLabels, wagonItemLabels, wagonObjectLabels, wagonSituationIcon } from '../helpers/wagonMap'
 import type { SessionResponse, WagonActiveSituation, WagonAnchor, WagonError, WagonItem, WagonSnapshot } from '../types'
 
@@ -55,13 +56,17 @@ function connectionLabel(status: string) {
 export function WagonPage() {
   const dispatch = useAppDispatch()
   const queryClient = useQueryClient()
+  const { enabled: musicEnabled, ready: musicReady, setEnabled: setMusicEnabled } = useMusicSettings()
   const musicPlayer = useAudioPlayer(require('../../assets/audio/wagon_ambient.mp3'))
-  const [musicEnabled, setMusicEnabled] = useState(true)
 
   useEffect(() => {
     musicPlayer.loop = true
     // The recording is quiet as well, for browsers that ignore the volume API.
     musicPlayer.volume = 0.35
+    if (!musicReady || !musicEnabled) {
+      musicPlayer.pause()
+      return
+    }
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       // Browsers allow sound after a gesture; starting the shift may be asynchronous.
       const startOnGesture = () => musicPlayer.play()
@@ -73,11 +78,11 @@ export function WagonPage() {
     }
     musicPlayer.play()
     return () => musicPlayer.pause()
-  }, [musicPlayer])
+  }, [musicPlayer, musicEnabled, musicReady])
 
   const toggleMusic = () => {
     if (musicEnabled) musicPlayer.pause()
-    else musicPlayer.play()
+    else if (musicReady) musicPlayer.play()
     setMusicEnabled(!musicEnabled)
   }
   const { wagonSessionId: sessionId, wagonWsPath: wsPath, wagonSnapshot: snapshot, wagonConnection: connection, wagonSelectedSituationId: selectedId, lessonId, lessonPracticeSessionId } = useAppSelector((state) => state.app)

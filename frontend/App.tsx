@@ -17,6 +17,7 @@ import { RootNavigator } from './src/components/RootNavigator'
 import { PushNotificationsBridge } from './src/components/PushNotificationsBridge'
 import { preloadGameAssets } from './src/helpers/gameAssets'
 import { colors } from './src/helpers/theme'
+import { MusicSettingsProvider } from './src/helpers/musicSettings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,7 +70,7 @@ export default function App() {
         <QueryClientProvider client={queryClient}>
           <StatusBar style="dark" />
           <PushNotificationsBridge />
-          <RootNavigator />
+          <MusicSettingsProvider><RootNavigator /></MusicSettingsProvider>
         </QueryClientProvider>
       </Provider>
     </SafeAreaProvider>
