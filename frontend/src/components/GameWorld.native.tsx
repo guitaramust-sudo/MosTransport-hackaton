@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber/native'
 import { OrthographicCamera, useAnimations, useGLTF } from '@react-three/drei/native'
 import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
+import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
 import { colors } from '../helpers/theme'
 import type { GameQuest } from '../types'
 import { Text } from './Typography'
@@ -112,7 +113,7 @@ function World({ targetEventId, targetSeatIndex, moveRequest, onArrive, playerPo
   playerPosition: MutableRefObject<PlayerPosition>
   moveToQuest: MutableRefObject<MoveToQuest | null>
 }) {
-  const wagon = useGLTF(wagonAsset) as unknown as { scene: Group }
+  const wagonScene = useNativeWagonScene()
   const conductor = useGLTF(conductorAsset) as unknown as { scene: Group; animations: AnimationClip[] }
   const character = useRef<Group>(null)
   const target = useRef({ x: AISLE_X, z: 0 })
@@ -203,7 +204,7 @@ function World({ targetEventId, targetSeatIndex, moveRequest, onArrive, playerPo
 
   return (
     <group>
-      <primitive object={wagon.scene} />
+      <primitive object={wagonScene} />
       <group ref={character}>
         <primitive object={conductor.scene} />
       </group>
@@ -265,7 +266,7 @@ export function GameWorld(props: GameWorldProps) {
   return (
     <View style={styles.root}>
       <Suspense fallback={<View style={styles.loader}><ActivityIndicator color={colors.primary} size="large" /></View>}>
-        <Canvas>
+        <Canvas gl={{ antialias: false }}>
           <color attach="background" args={['#BFD7CF']} />
           <GameCamera playerPosition={playerPosition} />
           <ambientLight intensity={1.65} />

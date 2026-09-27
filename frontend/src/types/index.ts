@@ -7,12 +7,15 @@ export type AppScreen =
   | "wagon_lobby"
   | "wagon"
   | "debrief"
-  | "profile";
+  | "profile"
+  | "admin";
 
 export interface Player {
   id: string;
   email: string;
   username: string;
+  role: "user" | "admin";
+  brigade_id?: string | null;
   total_xp: number;
 }
 export interface Tokens {
@@ -101,6 +104,15 @@ export interface Breakdown {
 export interface Profile {
   player: Player;
   competencies: Array<{ competency_id: number; xp: number }>;
+}
+
+export interface AdminLearningSummary {
+  data_status: string;
+  subject: { user_id: string; display_name?: string | null; source_system?: string | null; external_user_id?: string | null; assigned_class_ids?: string[] | null };
+  session_outcomes: { approved_completed_count: number; approved_passed_count: number; recent_assessments: Array<{ session_id: string; completed_at?: string | null; session_pass: boolean; session_safety_score: number; loyalty: number; critical_violations: number; unresolved_commitments: number }> };
+  competencies: Array<{ competency_id: number; code: string; name: string; score: number | null; confidence: number; status: string }>;
+  wagon_progression: { current_progress: number; levels: Array<{ level_id: string; order: number; title: string; status: 'locked' | 'unlocked' | 'passed'; attempts: number; passed: boolean; last_attempt_at?: string }> };
+  provenance: { scenario_version: string; scoring_rule_version: string; excluded_draft_count: number };
 }
 
 export interface LivePassenger {

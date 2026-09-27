@@ -13,10 +13,11 @@ const items: Array<{ screen: AppScreen; icon: string; label: string }> = [
 export function BottomNav() {
   const dispatch = useAppDispatch()
   const active = useAppSelector((state) => state.app.screen)
+  const isAdmin = useAppSelector((state) => state.app.auth?.player.role === 'admin')
 
   return (
     <View style={styles.nav}>
-      {items.map((item) => {
+      {[...items, ...(isAdmin ? [{ screen: 'admin' as AppScreen, icon: '⚙', label: 'Админ' }] : [])].map((item) => {
         const selected = active === item.screen
         return (
           <Pressable key={item.screen} style={styles.item} onPress={() => dispatch(navigate(item.screen))}>

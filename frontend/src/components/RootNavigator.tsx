@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAppSelector } from '../app/store'
 import { colors } from '../helpers/theme'
 import { AuthPage } from '../pages/AuthPage'
+import { AdminPage } from '../pages/AdminPage'
 import { DebriefPage } from '../pages/DebriefPage'
 import { HomePage } from '../pages/HomePage'
 import { ProfilePage } from '../pages/ProfilePage'
@@ -21,6 +22,7 @@ export function RootNavigator() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.app}>
         {screen === 'auth' && <AuthPage />}
+        {screen === 'admin' && <AdminPage />}
         {screen === 'home' && <HomePage />}
         {screen === 'scenarios' && <ScenariosPage />}
         {screen === 'simulation' && <SimulationPage />}

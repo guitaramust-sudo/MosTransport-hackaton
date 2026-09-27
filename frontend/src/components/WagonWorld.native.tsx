@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber/native'
 import { OrthographicCamera, useAnimations, useGLTF } from '@react-three/drei/native'
 import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
+import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
 import { colors } from '../helpers/theme'
 import { interpolateWagonActor, wagonAnchorPositions, wagonSituationIcon } from '../helpers/wagonMap'
 import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnapshot } from '../types'
@@ -207,7 +208,7 @@ function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onP
 }
 
 function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, onProject }: WagonWorldProps & { freeTarget: FreeWalkTarget | null; onFreeTarget: (x: number, z: number) => void; onProject: (value: Marker[]) => void }) {
-  const wagon = useGLTF(wagonAsset) as unknown as { scene: Group }
+  const wagonScene = useNativeWagonScene()
   const playerPosition = useRef<PlayerPosition>(interpolateConductor(snapshot.wagon_state.player))
   const situations = new Map(snapshot.active_situations.map((item) => [item.seat_anchor, item.type]))
   return (
@@ -215,7 +216,7 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <color attach="background" args={['#DCE8F4']} />
       <ambientLight intensity={2.1} />
       <directionalLight position={[4, 9, -2]} intensity={2.5} />
-      <primitive object={wagon.scene} />
+      <primitive object={wagonScene} />
       <mesh
         position={[AISLE_X, FLOOR_Y + 0.012, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -256,7 +257,7 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress }: WagonWorldProp
   }
   return (
     <View style={styles.container}>
-      <Canvas style={styles.canvas} shadows gl={{ antialias: true }}>
+      <Canvas style={styles.canvas} shadows gl={{ antialias: false }}>
         <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} freeTarget={freeTarget} onAnchorPress={handleAnchorPress} onFreeTarget={setVisualTarget} onProject={setMarkers} /></Suspense>
       </Canvas>
       {markers.map((marker) => marker.visible && (

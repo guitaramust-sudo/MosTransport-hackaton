@@ -6,7 +6,7 @@ import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
 import type { Group } from 'three'
 import { colors, radius } from '../helpers/theme'
 
-const modelAsset = require('../../assets/models/first_class_wagon.glb')
+const modelAsset = require('../../assets/models/TOOOPblend.glb')
 
 function WagonModel() {
   const { scene } = useGLTF(modelAsset) as unknown as { scene: Group }

@@ -2,14 +2,12 @@ import { Suspense } from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { Text } from './Typography'
 import { Canvas } from '@react-three/fiber/native'
-import { Bounds, OrbitControls, useGLTF } from '@react-three/drei/native'
-import type { Group } from 'three'
+import { Bounds, OrbitControls } from '@react-three/drei/native'
 import { colors, radius } from '../helpers/theme'
-
-const modelAsset = require('../../assets/models/first_class_wagon.glb')
+import { useNativeWagonScene } from '../helpers/useNativeWagonScene'
 
 function WagonModel() {
-  const { scene } = useGLTF(modelAsset) as unknown as { scene: Group }
+  const scene = useNativeWagonScene()
   return <primitive object={scene} />
 }
 
@@ -31,7 +29,7 @@ export function ModelStage() {
         <Text style={styles.hint}>Проведите пальцем, чтобы осмотреть</Text>
       </View>
       <Suspense fallback={<LoadingScene />}>
-        <Canvas camera={{ position: [5, 4, 6], fov: 42 }} style={styles.canvas}>
+        <Canvas camera={{ position: [5, 4, 6], fov: 42 }} style={styles.canvas} gl={{ antialias: false }}>
           <color attach="background" args={['#E9EEF0']} />
           <ambientLight intensity={1.8} />
           <directionalLight position={[5, 8, 6]} intensity={2.6} />

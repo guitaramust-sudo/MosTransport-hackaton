@@ -1,6 +1,6 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
-import type { AuthResult, Breakdown, LiveResult, LiveSimulation, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonLevelsResponse, WagonStartResponse } from '../types'
+import type { AdminLearningSummary, AuthResult, Breakdown, LiveResult, LiveSimulation, Player, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonLevelsResponse, WagonStartResponse } from '../types'
 
 const expoHost = Constants.expoConfig?.hostUri?.split(':')[0]
 const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'localhost'
@@ -84,7 +84,10 @@ async function request<T>(path: string, method = 'GET', body?: object, retry = t
 
 export const api = {
   login: (email: string, password: string) => request<AuthResult>('/auth/login', 'POST', { email, password }),
-  register: (email: string, username: string, password: string) => request<AuthResult>('/auth/register', 'POST', { email, username, password }),
+  createPlayer: (body: { email: string; username: string; password: string; brigade_name: string }) => request<{ player: Player }>('/admin/players', 'POST', body),
+  upsertExternalUser: (body: { source_system: string; external_user_id: string; display_name?: string; depot_id?: string; brigade_id?: string; assigned_class_ids: string[] }) => request<{ user_id: string; created: boolean; player: Player }>('/admin/users', 'POST', body),
+  learningSummary: (id: string) => request<AdminLearningSummary>(`/admin/users/${encodeURIComponent(id)}/learning-summary`),
+  approveSession: (id: string) => request<{ session_id: string; validation_status: string }>(`/admin/sessions/${encodeURIComponent(id)}/approve`, 'POST', {}),
   profile: async () => normalizeProfile(await request<Profile>('/api/profile')),
   startSession: async () => normalizeSession(await request<SessionResponse>('/api/session/start', 'POST', {})),
   getSession: async (id: string) => normalizeSession(await request<SessionResponse>(`/api/session/${id}`)),

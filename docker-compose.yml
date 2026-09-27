@@ -18,6 +18,9 @@ services:
   backend:
     build:
       context: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
