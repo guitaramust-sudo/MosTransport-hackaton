@@ -12,12 +12,20 @@
     },
     "android": {
       "package": "ru.moscowtransport.vsmtrainer",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#016EE4"
+      }
     },
     "plugins": [
       "expo-asset",
       "expo-font",
       "expo-notifications"
-    ]
+    ],
+    "icon": "./assets/images/icon.png",
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    }
   }
 }
