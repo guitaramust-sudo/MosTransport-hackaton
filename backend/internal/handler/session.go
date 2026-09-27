@@ -29,6 +29,9 @@ type situationDTO struct {
 	Loyalty                 int             `json:"loyalty"`
 	Safety                  int             `json:"safety"`
 	TimerDeadline           *time.Time      `json:"timer_deadline"`
+	SeatAnchor              *string         `json:"seat_anchor,omitempty"`
+	PhysicalRequirement     json.RawMessage `json:"physical_requirement,omitempty"`
+	PhysicalActionDone      bool            `json:"physical_action_done"`
 	Outcome                 *string         `json:"outcome,omitempty"`
 	Escalations             []string        `json:"escalations"`
 	XP                      int             `json:"xp"`
@@ -41,18 +44,21 @@ type situationDTO struct {
 
 func toSituationDTO(s domain.Situation, includeOpening bool) situationDTO {
 	d := situationDTO{
-		ID:             s.ID,
-		Status:         s.Status,
-		SituationDefID: s.SituationDefID,
-		PassengerID:    s.PassengerID,
-		Loyalty:        s.Loyalty,
-		Safety:         s.Safety,
-		TimerDeadline:  s.TimerDeadline,
-		Outcome:        s.Outcome,
-		Escalations:    s.Escalations,
-		XP:             s.XP,
-		Remarks:        s.Remarks,
-		ScoreResult:    s.ScoreResult,
+		ID:                  s.ID,
+		Status:              s.Status,
+		SituationDefID:      s.SituationDefID,
+		PassengerID:         s.PassengerID,
+		Loyalty:             s.Loyalty,
+		Safety:              s.Safety,
+		TimerDeadline:       s.TimerDeadline,
+		SeatAnchor:          s.SeatAnchor,
+		PhysicalRequirement: s.PhysicalRequirement,
+		PhysicalActionDone:  s.PhysicalActionDone,
+		Outcome:             s.Outcome,
+		Escalations:         s.Escalations,
+		XP:                  s.XP,
+		Remarks:             s.Remarks,
+		ScoreResult:         s.ScoreResult,
 	}
 	if p := s.PassengerParams; p != nil {
 		d.Code, _ = p["code"].(string)
@@ -146,6 +152,9 @@ func (h *Handlers) FinishSession(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if h.WagonManager != nil {
+		h.WagonManager.Stop(id)
 	}
 	writeJSON(w, http.StatusOK, breakdown)
 }

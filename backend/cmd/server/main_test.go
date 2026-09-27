@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/mostransport/vsm-trainer/internal/handler"
 )
 
 func TestCORSAllowsConfiguredOriginOnly(t *testing.T) {
@@ -26,5 +28,15 @@ func TestCORSAllowsConfiguredOriginOnly(t *testing.T) {
 		if res.Code != tc.status || res.Header().Get("Access-Control-Allow-Origin") != tc.allow {
 			t.Fatalf("origin %s: status %d, allow %q", tc.origin, res.Code, res.Header().Get("Access-Control-Allow-Origin"))
 		}
+	}
+}
+
+func TestWagonWebSocketRouteBypassesHeaderJWTMiddleware(t *testing.T) {
+	router := routes(&handler.Handlers{}, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/wagon/not-a-uuid/ws?token=invalid", nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("websocket route status = %d, want 400 from session ID validation", res.Code)
 	}
 }

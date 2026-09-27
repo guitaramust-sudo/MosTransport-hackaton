@@ -42,6 +42,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load content: %w", err)
 	}
+	wagonClasses, err := content.LoadWagonClasses()
+	if err != nil {
+		return fmt.Errorf("load wagon classes: %w", err)
+	}
 	simTemplate, err := simulation.Load()
 	if err != nil {
 		return fmt.Errorf("load simulation template: %w", err)
@@ -71,13 +75,29 @@ func run() error {
 	auth := service.NewAuthService(store, cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 	situations := service.NewSituationService(store, client, catalog)
 	simulationService := service.NewSimulationService(store, simTemplate, cfg.PointsNamespace, client)
+	wagonCatalog := catalog
+	wagonCatalog.Scenarios = nil
+	for _, scenario := range catalog.Scenarios {
+		if scenario.ValidationStatus == "approved" || (cfg.PointsNamespace == "demo" && scenario.ValidationStatus == "draft") {
+			wagonCatalog.Scenarios = append(wagonCatalog.Scenarios, scenario)
+		}
+	}
+	wagonManager := service.NewWagonManager(store, wagonCatalog)
+	defer wagonManager.StopAll()
+	if err := wagonManager.Recover(ctx, wagonClasses); err != nil {
+		return fmt.Errorf("recover wagon sessions: %w", err)
+	}
+	wagonService := service.NewWagonService(store, wagonCatalog, wagonClasses, wagonManager)
 	h := &handler.Handlers{
-		Auth:       auth,
-		Profile:    service.NewProfileService(store, cfg.PointsNamespace),
-		Session:    service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
-		Situation:  situations,
-		Admin:      service.NewAdminService(store, catalog),
-		Simulation: simulationService,
+		Auth:         auth,
+		Profile:      service.NewProfileService(store, cfg.PointsNamespace),
+		Session:      service.NewSessionService(store, catalog, cfg.SituationsPerSession, situations, cfg.PointsNamespace),
+		Situation:    situations,
+		Admin:        service.NewAdminService(store, catalog),
+		Simulation:   simulationService,
+		Wagon:        wagonService,
+		WagonManager: wagonManager,
+		WagonClasses: wagonClasses,
 	}
 	router := routes(h, auth, store)
 	server := &http.Server{
@@ -154,6 +174,8 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Get("/leaderboards", h.GetScopedLeaderboard)
 		r.Post("/session/start", h.StartSession)
 		r.Post("/session/simulations", h.StartSimulation)
+		r.Post("/session/wagon/start", h.StartWagonSession)
+		r.Get("/wagon/classes", h.ListWagonClasses)
 		r.Get("/session/simulations/{id}", h.GetSimulation)
 		r.Get("/session/simulations/{id}/result", h.SimulationResult)
 		r.Post("/session/simulations/{id}/actions", h.SimulationAction)
@@ -165,6 +187,7 @@ func routes(h *handler.Handlers, auth *service.AuthService, store *postgres.Stor
 		r.Post("/situation/{id}/escalate", h.Escalate)
 		r.Post("/situation/{id}/finish", h.FinishSituation)
 	})
+	r.Get("/api/wagon/{id}/ws", h.WagonWS)
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(appmiddleware.AdminAuth(auth))
 		r.Post("/users", h.CreateExternalUser)

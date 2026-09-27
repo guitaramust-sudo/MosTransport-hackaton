@@ -4,17 +4,21 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/mostransport/vsm-trainer/internal/content"
 	"github.com/mostransport/vsm-trainer/internal/service"
 )
 
 // Handlers bundles all HTTP handlers and their dependencies.
 type Handlers struct {
-	Auth       *service.AuthService
-	Profile    *service.ProfileService
-	Session    *service.SessionService
-	Situation  *service.SituationService
-	Admin      *service.AdminService
-	Simulation *service.SimulationService
+	Auth         *service.AuthService
+	Profile      *service.ProfileService
+	Session      *service.SessionService
+	Situation    *service.SituationService
+	Admin        *service.AdminService
+	Simulation   *service.SimulationService
+	Wagon        *service.WagonService
+	WagonManager *service.WagonManager
+	WagonClasses content.WagonClasses
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
