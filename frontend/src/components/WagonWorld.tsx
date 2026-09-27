@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
-import { Mesh, Vector3, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
-import { conductorAsset, wagonAsset } from '../helpers/gameAssets'
-import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, useThree, useWagonScene } from '../helpers/three'
+import { Mesh, RepeatWrapping, SRGBColorSpace, Vector3, type Texture, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
+import { conductorAsset, forestAsset, wagonAsset } from '../helpers/gameAssets'
+import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, textureSource, useTexture, useThree, useWagonScene } from '../helpers/three'
 import { colors } from '../helpers/theme'
 import { AISLE_MAX_Z, AISLE_MIN_Z, aislePoint, wagonAnchorLabels, interpolateWagonActor, pointAlong, pointsOfInterestFor, routeBetween, servicePointFor, wagonAnchorPositions, wagonSituationIcon, type FloorPoint } from '../helpers/wagonMap'
 import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnapshot } from '../types'
@@ -18,6 +18,8 @@ interface WagonWorldProps {
   snapshot: WagonSnapshot
   disabled?: boolean
   onAnchorPress: (anchor: WagonAnchor) => void
+  /** Lessons show their own task card, so the generic hint can be turned off. */
+  showHint?: boolean
 }
 
 interface PlayerPosition { x: number; y: number; z: number }
@@ -192,6 +194,30 @@ function CameraFollow({ playerPosition }: { playerPosition: MutableRefObject<Pla
   return <OrthographicCamera ref={camera} makeDefault position={[0, 18, 10]} zoom={zoom} near={4} far={45} />
 }
 
+// One forest tile covers FOREST_TILE_W x FOREST_TILE_W * (1024 / 618) world units (image aspect).
+const FOREST_TILE_W = 9
+const FOREST_SIZE = { width: 48, length: 140 }
+const FOREST_SPEED = 0.18 // tiles per second: the train visibly moving
+
+/** Forest ground under the wagon, scrolling backwards along the track. */
+function ForestGround() {
+  const texture = useTexture(textureSource(forestAsset)) as Texture
+  useMemo(() => {
+    texture.wrapS = RepeatWrapping
+    texture.wrapT = RepeatWrapping
+    texture.colorSpace = SRGBColorSpace
+    texture.repeat.set(FOREST_SIZE.width / FOREST_TILE_W, FOREST_SIZE.length / (FOREST_TILE_W * (1024 / 618)))
+    texture.needsUpdate = true
+  }, [texture])
+  useFrame((_, delta) => { texture.offset.y = (texture.offset.y + delta * FOREST_SPEED) % 1 })
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.6, 0]} raycast={() => null}>
+      <planeGeometry args={[FOREST_SIZE.width, FOREST_SIZE.length]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+  )
+}
+
 function poiIcon(anchor: WagonAnchor) {
   if (anchor === 'service_point' || anchor === 'service_zone') return '+'
   if (anchor === 'staff_zone' || anchor === 'cab_entrance_boundary') return '⌁'
@@ -202,7 +228,7 @@ function poiIcon(anchor: WagonAnchor) {
 const restrictedAnchors = new Set<WagonAnchor>(['staff_zone', 'cab_entrance_boundary'])
 // Keep markers out of the bottom action area (inspect / finish buttons, hint)
 // so a marker never sits under a button and swallows or loses the tap.
-const MARKER_BOTTOM_SAFE = 190
+const MARKER_BOTTOM_SAFE = 170
 
 function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onProject: (value: Marker[]) => void }) {
   const point = useRef(new Vector3())
@@ -237,6 +263,7 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <color attach="background" args={['#DCE8F4']} />
       <ambientLight intensity={2.1} />
       <directionalLight position={[4, 9, -2]} intensity={2.5} />
+      <Suspense fallback={null}><ForestGround /></Suspense>
       <primitive object={wagonScene} />
       <WagonBlanket onPress={() => { if (!disabled) onAnchorPress(servicePointFor(snapshot.wagon_state.class_id)) }} />
       <mesh
@@ -260,7 +287,7 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
   )
 }
 
-export function WagonWorld({ snapshot, disabled, onAnchorPress }: WagonWorldProps) {
+export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true }: WagonWorldProps) {
   const [markers, setMarkers] = useState<Marker[]>([])
   const [freeTarget, setFreeTarget] = useState<FreeWalkTarget | null>(null)
   // The onboarding hint goes away once the player has tapped anything.
@@ -288,7 +315,7 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress }: WagonWorldProp
           <Text style={[styles.markerText, !marker.active && styles.markerTextQuiet]}>{marker.icon}</Text>
         </Pressable>
       ))}
-      {!interacted && <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Нажмите на пассажира или точку вагона</Text></View>}
+      {showHint && !interacted && <View pointerEvents="none" style={styles.tip}><Text style={styles.tipText}>Нажмите на пассажира или точку вагона</Text></View>}
       {!snapshot && <ActivityIndicator style={StyleSheet.absoluteFill} color={colors.primary} />}
     </View>
   )
@@ -299,6 +326,6 @@ const styles = StyleSheet.create({
   marker: { position: 'absolute', width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.88)', borderWidth: 2, borderColor: colors.primary, shadowColor: '#06113F', shadowOpacity: .2, shadowRadius: 5, elevation: 5 },
   markerActive: { width: 46, height: 46, borderRadius: 23, marginLeft: -3, marginTop: -3, backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: colors.loyalty },
   markerRestricted: { borderColor: colors.critical }, markerText: { fontSize: 20, color: colors.primary, fontWeight: '900' }, markerTextQuiet: { fontSize: 16 },
-  tip: { position: 'absolute', left: 20, right: 20, bottom: 18, alignItems: 'center' },
+  tip: { position: 'absolute', left: 20, right: 20, bottom: 104, alignItems: 'center' },
   tipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', backgroundColor: 'rgba(16,26,61,.72)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99 },
 })
