@@ -13,10 +13,10 @@ import (
 	"github.com/mostransport/vsm-trainer/internal/repo"
 )
 
-const sessionColumns = `id, player_id, status, pending_situations, validation_status, created_at, finished_at`
+const sessionColumns = `id, player_id, status, pending_situations, validation_status, created_at, finished_at, wagon_state`
 
 func scanSession(sess *domain.Session) []any {
-	return []any{&sess.ID, &sess.PlayerID, &sess.Status, &sess.PendingSituations, &sess.ValidationStatus, &sess.CreatedAt, &sess.FinishedAt}
+	return []any{&sess.ID, &sess.PlayerID, &sess.Status, &sess.PendingSituations, &sess.ValidationStatus, &sess.CreatedAt, &sess.FinishedAt, &sess.WagonState}
 }
 
 func (s *Store) CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error) {
@@ -26,6 +26,23 @@ func (s *Store) CreateSession(ctx context.Context, playerID uuid.UUID) (domain.S
 		playerID,
 	).Scan(scanSession(&sess)...)
 	return sess, err
+}
+
+func (s *Store) CreateWagonSession(ctx context.Context, playerID uuid.UUID, state domain.WagonState) (domain.Session, error) {
+	var sess domain.Session
+	err := s.pool.QueryRow(ctx, `INSERT INTO sessions (player_id, wagon_state) VALUES ($1, $2) RETURNING `+sessionColumns, playerID, state).Scan(scanSession(&sess)...)
+	return sess, err
+}
+
+func (s *Store) UpdateWagonState(ctx context.Context, sessionID uuid.UUID, state domain.WagonState) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET wagon_state = $2 WHERE id = $1 AND status = 'active' AND wagon_state IS NOT NULL`, sessionID, state)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return repo.ErrConflict
+	}
+	return nil
 }
 
 func (s *Store) GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error) {
@@ -161,21 +178,23 @@ func (s *Store) ListPlayerSessions(ctx context.Context, playerID uuid.UUID) ([]d
 
 func (s *Store) CreateSituation(ctx context.Context, sit domain.Situation) (domain.Situation, error) {
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO situations (session_id, status, passenger_params, loyalty, safety, timer_deadline, situation_def_id, passenger_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO situations (session_id, status, passenger_params, loyalty, safety, timer_deadline, situation_def_id, passenger_id, seat_anchor, physical_requirement)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		 RETURNING `+situationColumns,
-		sit.SessionID, sit.Status, sit.PassengerParams, sit.Loyalty, sit.Safety, sit.TimerDeadline, sit.SituationDefID, sit.PassengerID,
+		sit.SessionID, sit.Status, sit.PassengerParams, sit.Loyalty, sit.Safety, sit.TimerDeadline, sit.SituationDefID, sit.PassengerID, sit.SeatAnchor, sit.PhysicalRequirement,
 	).Scan(situationScan(&sit)...)
 	return sit, err
 }
 
 const situationColumns = `id, session_id, status, situation_def_id, passenger_id, passenger_params,
-	escalations, remarks, score_result, xp, loyalty, safety, timer_deadline, outcome, closed_at, created_at`
+	escalations, remarks, score_result, xp, loyalty, safety, timer_deadline, outcome, closed_at, created_at,
+	seat_anchor, physical_requirement, physical_action_done`
 
 func situationScan(sit *domain.Situation) []any {
 	return []any{&sit.ID, &sit.SessionID, &sit.Status, &sit.SituationDefID, &sit.PassengerID,
 		&sit.PassengerParams, &sit.Escalations, &sit.Remarks, &sit.ScoreResult, &sit.XP,
-		&sit.Loyalty, &sit.Safety, &sit.TimerDeadline, &sit.Outcome, &sit.ClosedAt, &sit.CreatedAt}
+		&sit.Loyalty, &sit.Safety, &sit.TimerDeadline, &sit.Outcome, &sit.ClosedAt, &sit.CreatedAt,
+		&sit.SeatAnchor, &sit.PhysicalRequirement, &sit.PhysicalActionDone}
 }
 
 func (s *Store) GetSituation(ctx context.Context, id uuid.UUID) (domain.Situation, error) {
@@ -236,6 +255,17 @@ func (s *Store) AddEscalation(ctx context.Context, situationID uuid.UUID, target
 		return nil, repo.ErrNotFound
 	}
 	return actual, err
+}
+
+func (s *Store) SetPhysicalActionDone(ctx context.Context, situationID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE situations SET physical_action_done = true WHERE id = $1 AND status = 'active'`, situationID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return repo.ErrConflict
+	}
+	return nil
 }
 
 func (s *Store) ListExpiredSituationIDs(ctx context.Context, now time.Time) ([]uuid.UUID, error) {

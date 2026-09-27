@@ -71,6 +71,8 @@ type Store interface {
 
 	// Sessions
 	CreateSession(ctx context.Context, playerID uuid.UUID) (domain.Session, error)
+	CreateWagonSession(ctx context.Context, playerID uuid.UUID, state domain.WagonState) (domain.Session, error)
+	UpdateWagonState(ctx context.Context, sessionID uuid.UUID, state domain.WagonState) error
 	CreateSessionWithSituations(ctx context.Context, playerID uuid.UUID, pending []string, situations []domain.Situation) (domain.Session, []domain.Situation, error)
 	SpawnNextSituation(ctx context.Context, sessionID uuid.UUID, resolve func(scenarioID string) (domain.Situation, error)) (*domain.Situation, error)
 	GetSession(ctx context.Context, id uuid.UUID) (domain.Session, error)
@@ -85,6 +87,7 @@ type Store interface {
 
 	// Situations
 	CreateSituation(ctx context.Context, s domain.Situation) (domain.Situation, error)
+	SetPhysicalActionDone(ctx context.Context, situationID uuid.UUID) error
 	GetSituation(ctx context.Context, id uuid.UUID) (domain.Situation, error)
 	ListSituationsBySession(ctx context.Context, sessionID uuid.UUID) ([]domain.Situation, error)
 	UpdateSituation(ctx context.Context, s domain.Situation) error

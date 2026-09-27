@@ -8,19 +8,19 @@ import (
 )
 
 type Player struct {
-	ID               uuid.UUID  `json:"id"`
-	Email            string     `json:"email"`
-	Username         string     `json:"username"`
-	PasswordHash     string     `json:"-"`
-	Role             string     `json:"role"`
-	DisplayName      *string    `json:"display_name,omitempty"`
-	SourceSystem     *string    `json:"source_system,omitempty"`
-	ExternalUserID   *string    `json:"external_user_id,omitempty"`
-	AssignedClassIDs []string   `json:"assigned_class_ids,omitempty"`
-	DepotID          *string    `json:"depot_id,omitempty"`
-	BrigadeID        *string    `json:"brigade_id,omitempty"`
-	TotalXP          int        `json:"total_xp"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               uuid.UUID `json:"id"`
+	Email            string    `json:"email"`
+	Username         string    `json:"username"`
+	PasswordHash     string    `json:"-"`
+	Role             string    `json:"role"`
+	DisplayName      *string   `json:"display_name,omitempty"`
+	SourceSystem     *string   `json:"source_system,omitempty"`
+	ExternalUserID   *string   `json:"external_user_id,omitempty"`
+	AssignedClassIDs []string  `json:"assigned_class_ids,omitempty"`
+	DepotID          *string   `json:"depot_id,omitempty"`
+	BrigadeID        *string   `json:"brigade_id,omitempty"`
+	TotalXP          int       `json:"total_xp"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 const (
@@ -47,13 +47,14 @@ const (
 )
 
 type Session struct {
-	ID                uuid.UUID  `json:"id"`
-	PlayerID          uuid.UUID  `json:"player_id"`
-	Status            string     `json:"status"`
-	PendingSituations []string   `json:"pending_situations,omitempty"`
-	ValidationStatus  string     `json:"validation_status"`
-	CreatedAt         time.Time  `json:"created_at"`
-	FinishedAt        *time.Time `json:"finished_at"`
+	ID                uuid.UUID   `json:"id"`
+	PlayerID          uuid.UUID   `json:"player_id"`
+	Status            string      `json:"status"`
+	PendingSituations []string    `json:"pending_situations,omitempty"`
+	WagonState        *WagonState `json:"wagon_state,omitempty"`
+	ValidationStatus  string      `json:"validation_status"`
+	CreatedAt         time.Time   `json:"created_at"`
+	FinishedAt        *time.Time  `json:"finished_at"`
 }
 
 const (
@@ -62,22 +63,25 @@ const (
 )
 
 type Situation struct {
-	ID              uuid.UUID       `json:"id"`
-	SessionID       uuid.UUID       `json:"session_id"`
-	Status          string          `json:"status"`
-	SituationDefID  *string         `json:"situation_def_id,omitempty"`
-	PassengerID     *string         `json:"passenger_id,omitempty"`
-	PassengerParams map[string]any  `json:"passenger_params"`
-	Escalations     []string        `json:"escalations"`
-	Remarks         json.RawMessage `json:"remarks,omitempty"`
-	ScoreResult     json.RawMessage `json:"score_result,omitempty"`
-	XP              int             `json:"xp"`
-	Loyalty         int             `json:"loyalty"`
-	Safety          int             `json:"safety"`
-	TimerDeadline   *time.Time      `json:"timer_deadline"`
-	Outcome         *string         `json:"outcome"`
-	ClosedAt        *time.Time      `json:"closed_at,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
+	ID                  uuid.UUID       `json:"id"`
+	SessionID           uuid.UUID       `json:"session_id"`
+	Status              string          `json:"status"`
+	SituationDefID      *string         `json:"situation_def_id,omitempty"`
+	PassengerID         *string         `json:"passenger_id,omitempty"`
+	PassengerParams     map[string]any  `json:"passenger_params"`
+	Escalations         []string        `json:"escalations"`
+	Remarks             json.RawMessage `json:"remarks,omitempty"`
+	ScoreResult         json.RawMessage `json:"score_result,omitempty"`
+	XP                  int             `json:"xp"`
+	Loyalty             int             `json:"loyalty"`
+	Safety              int             `json:"safety"`
+	TimerDeadline       *time.Time      `json:"timer_deadline"`
+	SeatAnchor          *string         `json:"seat_anchor,omitempty"`
+	PhysicalRequirement json.RawMessage `json:"physical_requirement,omitempty"`
+	PhysicalActionDone  bool            `json:"physical_action_done"`
+	Outcome             *string         `json:"outcome"`
+	ClosedAt            *time.Time      `json:"closed_at,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 type Message struct {
