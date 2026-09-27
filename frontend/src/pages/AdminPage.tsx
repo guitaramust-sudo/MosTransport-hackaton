@@ -66,7 +66,7 @@ export function AdminPage() {
 
   if (role !== 'admin') return <Page title="Админка"><Card><Text>Доступен только администратору.</Text><Button title="На главную" onPress={() => dispatch(navigate('home'))} /></Card></Page>
 
-  return <Page title="Админка">
+  return <Page title="Админ-консоль" onBack={() => dispatch(navigate('profile'))}>
     <View style={styles.tabs}>{sections.map((item) => <Pressable key={item.id} onPress={() => selectSection(item.id)} style={[styles.tab, section === item.id && styles.activeTab]}><Text style={[styles.tabText, section === item.id && styles.activeTabText]}>{item.title}</Text></Pressable>)}</View>
     <ErrorText error={error} />
     {notice && <Text style={styles.notice}>{notice}</Text>}

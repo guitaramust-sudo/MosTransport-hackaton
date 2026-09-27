@@ -1,6 +1,6 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { useDispatch, useSelector } from 'react-redux'
-import { setTokens } from '../api/client'
+import { setSessionExpiredHandler, setTokens } from '../api/client'
 import type { AppScreen, AuthResult, Breakdown, LiveSimulation, Player, SessionResponse, WagonSnapshot } from '../types'
 
 export type WagonConnection = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'
@@ -17,10 +17,14 @@ interface AppState {
   wagonSnapshot: WagonSnapshot | null
   wagonSelectedSituationId: string | null
   wagonConnection: WagonConnection
+  /** Lesson opened on the lesson screen; also marks its wagon session as a lesson practice. */
+  lessonId: string | null
+  lessonPracticeSessionId: string | null
 }
 const initialState: AppState = {
   screen: 'auth', auth: null, shift: null, situationId: null, breakdown: null, liveSimulation: null,
   wagonSessionId: null, wagonWsPath: null, wagonSnapshot: null, wagonSelectedSituationId: null, wagonConnection: 'idle',
+  lessonId: null, lessonPracticeSessionId: null,
 }
 const slice = createSlice({
   name: 'app', initialState,
@@ -66,6 +70,30 @@ const slice = createSlice({
       state.wagonSelectedSituationId = null
       state.wagonConnection = 'idle'
     },
+    openLesson(state, action: PayloadAction<string>) {
+      state.lessonId = action.payload
+      state.screen = 'lesson'
+    },
+    startLessonPractice(state, action: PayloadAction<{ lessonId: string; sessionId: string; wsPath?: string }>) {
+      state.lessonId = action.payload.lessonId
+      state.lessonPracticeSessionId = action.payload.sessionId
+      state.wagonSessionId = action.payload.sessionId
+      state.wagonWsPath = action.payload.wsPath ?? `/api/wagon/${action.payload.sessionId}/ws`
+      state.wagonSnapshot = null
+      state.wagonSelectedSituationId = null
+      state.wagonConnection = 'connecting'
+      state.screen = 'wagon'
+    },
+    /** A lesson practice run ended: go back to the lesson for its practice check. */
+    lessonPracticeFinished(state) {
+      state.lessonPracticeSessionId = null
+      state.wagonSessionId = null
+      state.wagonWsPath = null
+      state.wagonSnapshot = null
+      state.wagonSelectedSituationId = null
+      state.wagonConnection = 'idle'
+      state.screen = 'lesson'
+    },
     setWagonBreakdown(state, action: PayloadAction<Breakdown>) {
       state.breakdown = action.payload
       state.wagonSessionId = null
@@ -81,8 +109,10 @@ export const {
   navigate, signedIn, signedOut, setShift, selectSituation, refreshShift, setBreakdown, setPlayer,
   setLiveSimulation, updateLiveSimulation, setWagonSession, updateWagonSnapshot,
   setWagonSelectedSituation, setWagonConnection, clearWagon, setWagonBreakdown,
+  openLesson, startLessonPractice, lessonPracticeFinished,
 } = slice.actions
 export const store = configureStore({ reducer: { app: slice.reducer } })
+setSessionExpiredHandler(() => { if (store.getState().app.auth) store.dispatch(signedOut()) })
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch
 export const useAppDispatch = useDispatch.withTypes<AppDispatch>()

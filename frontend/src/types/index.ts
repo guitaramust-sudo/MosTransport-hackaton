@@ -1,15 +1,16 @@
 export type AppScreen =
   | "auth"
   | "home"
+  | "practice"
+  | "progress"
+  | "lesson"
   | "scenarios"
   | "simulation"
   | "live_simulation"
-  | "wagon_lobby"
   | "wagon"
   | "debrief"
   | "profile"
-  | "admin"
-  | "learning_map";
+  | "admin";
 
 export interface Player {
   id: string;
@@ -102,9 +103,51 @@ export interface Breakdown {
   competencies_xp: Record<string, number>;
   situations: SituationBreakdown[];
 }
+export interface CompetencyAssessment {
+  competency_id: number;
+  code: string;
+  name: string;
+  /** Accumulated XP; null while there is no evidence. */
+  score: number | null;
+  confidence: number;
+  status: "insufficient" | "provisional" | "assessed" | string;
+  evidence_count: number;
+}
+export type AchievementId = "first_complete" | "first_signal" | string;
 export interface Profile {
   player: Player;
-  competencies: Array<{ competency_id: number; xp: number }>;
+  level: number;
+  competencies: CompetencyAssessment[];
+  achievements: AchievementId[];
+  leaderboard_points_total: number;
+}
+export type LeaderboardScope = "brigade" | "depot" | "company";
+export interface ScopedLeaderboardEntry {
+  rank: number;
+  player_id: string;
+  username: string;
+  leaderboard_points_total: number;
+  percentile: number;
+}
+export interface ScopedLeaderboard {
+  group_scope: LeaderboardScope;
+  group_id: string;
+  group_size: number;
+  entries: ScopedLeaderboardEntry[];
+}
+export interface ChallengeProgress {
+  challenge_id: string;
+  seed_variants: number;
+  target: number;
+  completed: boolean;
+  reward_xp: number;
+}
+export interface AppNotification {
+  id: number;
+  type: string;
+  subject_key: string;
+  payload: unknown;
+  created_at: string;
 }
 
 export interface AdminLearningSummary {
@@ -246,6 +289,9 @@ export type WagonAnchor =
   | 'seat_6'
   | 'service_point'
   | 'staff_zone'
+  | 'service_zone'
+  | 'sanitary_zone'
+  | 'cab_entrance_boundary'
 
 export type WagonItem = 'blanket' | 'water' | 'coffee'
 export type WagonSituationType = 'cold' | 'thirsty' | 'tired' | 'zone_intrusion' | string
@@ -272,7 +318,7 @@ export interface WagonSeat {
 }
 
 export interface WagonState {
-  class_id: 'standard'
+  class_id: 'standard' | 'first'
   level_id: string
   restricted_anchors: WagonAnchor[]
   seats: WagonSeat[]
@@ -280,6 +326,8 @@ export interface WagonState {
   carried_items: WagonItem[] | null
   started_at: string
   duration_s: number
+  visited_anchors?: WagonAnchor[] | null
+  inspected_objects?: string[] | null
 }
 
 export interface WagonActiveSituation {
@@ -325,3 +373,85 @@ export interface WagonLevelsResponse {
 export type WagonPhysicalRequirement =
   | { kind: 'deliver_item'; item: WagonItem }
   | { kind: 'redirect' }
+
+/* ---------- Curriculum (GDD §27–§29) ---------- */
+
+export type LessonStatus = 'locked' | 'unlocked' | 'completed'
+
+export interface LearningLessonSummary {
+  lesson_id: string
+  title: string
+  order: number
+  status: LessonStatus
+  badge_id: string
+}
+
+export interface LearningChapter {
+  chapter_id: string
+  title: string
+  order: number
+  lessons: LearningLessonSummary[]
+}
+
+export interface LearningMap {
+  chapters: LearningChapter[]
+}
+
+export interface LessonQuestion {
+  question_id: string
+  phase: 'theory' | 'practice'
+  type: string
+  prompt: string
+  options?: Array<{ option_id: string; text: string }>
+}
+
+export interface LessonProgress {
+  lesson_id: string
+  theory_pass: boolean
+  practice_session_id?: string
+  practice_pass: boolean
+  practice_check_pass: boolean
+  completed_at?: string
+  content_version: string
+}
+
+export interface LessonDetail {
+  lesson_id: string
+  title: string
+  theory_cards: string[]
+  questions: LessonQuestion[]
+  progress: LessonProgress
+  completion_rule: 'visit_inspect' | 'scenario_result' | string
+  required_anchor_ids: string[]
+  required_object_ids: string[]
+  estimated_min: number
+  badge_id: string
+}
+
+export interface LessonAnswerResult {
+  correct: boolean
+  feedback: string
+  phase_pass: boolean
+}
+
+export interface LessonFinalizeResult {
+  completed: boolean
+  missing?: Array<'theory_pass' | 'practice_pass' | 'practice_check_pass'>
+  award_granted: boolean
+  xp_awarded?: number
+  badge_id?: string
+  debrief: string
+  found_anchors?: string[]
+  missing_anchors?: string[]
+  found_objects?: string[]
+  missing_objects?: string[]
+  scenario_pass?: boolean
+}
+
+export interface MyLearning {
+  lessons: Array<{ lesson_id: string; status: LessonStatus; completed_at?: string }>
+  prize_balance: number
+  prize_next_expiry: string | null
+  prize_shirt_threshold: number
+  prize_shirt_progress: number
+}

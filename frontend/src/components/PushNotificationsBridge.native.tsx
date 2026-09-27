@@ -5,7 +5,8 @@ import { syncExistingPushRegistration } from '../helpers/pushNotifications'
 import type { AppScreen } from '../types'
 
 function destination(data: Record<string, unknown>): AppScreen | null {
-  if (data.screen === 'learning_map') return 'learning_map'
+  // The curriculum map lives on the home tab.
+  if (data.screen === 'learning_map') return 'home'
   if (data.screen === 'prize_balance') return 'profile'
   return null
 }

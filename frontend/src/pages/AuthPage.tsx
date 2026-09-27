@@ -1,10 +1,29 @@
-import { useState } from 'react'
-import { StyleSheet } from 'react-native'
+import { useState, type ComponentProps } from 'react'
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native'
 import { api, setTokens } from '../api/client'
 import { signedIn, useAppDispatch } from '../app/store'
-import { Button, Card, ErrorText, Page } from '../components/UI'
+import { Logo } from '../components/Logo'
+import { Button, ErrorText, SpeedLine } from '../components/UI'
 import { Text, TextInput } from '../components/Typography'
-import { colors, radius } from '../helpers/theme'
+import { colors, radius, spacing, type } from '../helpers/theme'
+
+function Field({ label, value, onChangeText, error, ...props }: {
+  label: string
+  value: string
+  onChangeText: (value: string) => void
+  error?: boolean
+} & ComponentProps<typeof TextInput>) {
+  const [focused, setFocused] = useState(false)
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput {...props} value={value} onChangeText={onChangeText}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        placeholderTextColor={colors.faint} accessibilityLabel={label}
+        style={[styles.input, focused && styles.inputFocused, error && styles.inputError]} />
+    </View>
+  )
+}
 
 export function AuthPage() {
   const dispatch = useAppDispatch()
@@ -23,21 +42,41 @@ export function AuthPage() {
     finally { setBusy(false) }
   }
 
-  return <Page title="Войти">
-    <Card>
-      <Text style={styles.label}>Электронная почта</Text>
-      <TextInput style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-      <Text style={styles.label}>Пароль</Text>
-      <TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" />
-      <ErrorText error={error} />
-      <Button title="Войти" onPress={submit} busy={busy} disabled={!email.trim() || !password} />
-      <Text style={styles.hint}>Аккаунт создаёт администратор. Получите у него адрес почты и пароль.</Text>
-    </Card>
-  </Page>
+  const canSubmit = !!email.trim() && !!password
+
+  return (
+    <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.column}>
+          <Logo size={44} />
+          <SpeedLine style={styles.speed} />
+
+          <Text style={styles.title}>Добро пожаловать в команду ВСМ</Text>
+          <Text style={styles.subtitle}>Тренажёр проводника. Войдите в учётную запись — её создаёт администратор.</Text>
+
+          <Field label="Электронная почта" value={email} onChangeText={setEmail} error={!!error}
+            autoCapitalize="none" keyboardType="email-address" autoComplete="email" placeholder="name@company.ru" />
+          <Field label="Пароль" value={password} onChangeText={setPassword} error={!!error}
+            secureTextEntry autoComplete="current-password" onSubmitEditing={canSubmit ? submit : undefined} />
+          <ErrorText error={error} />
+          <Button title="Войти" onPress={submit} busy={busy} disabled={!canSubmit} style={styles.submit} />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  )
 }
 
 const styles = StyleSheet.create({
-  label: { color: colors.ink, fontWeight: '700', marginTop: 12, marginBottom: 5 },
-  input: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: radius.md, padding: 12, fontSize: 16 },
-  hint: { color: colors.muted, fontSize: 13, marginTop: 14 },
+  page: { flex: 1, backgroundColor: colors.surface },
+  content: { flexGrow: 1, padding: spacing.md, alignItems: 'center', justifyContent: 'center' },
+  column: { width: '100%', maxWidth: 440 },
+  speed: { marginTop: spacing.md, marginBottom: spacing.xl },
+  title: { ...type.h1, color: colors.ink },
+  subtitle: { ...type.secondary, color: colors.secondary, marginTop: spacing.xs, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.md },
+  label: { ...type.secondary, fontWeight: '500', color: colors.ink, marginBottom: 6 },
+  input: { outlineWidth: 0, minHeight: 52, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.background, borderRadius: radius.button, paddingHorizontal: 16, fontSize: 16, color: colors.ink },
+  inputFocused: { borderColor: colors.action, backgroundColor: colors.surface },
+  inputError: { borderColor: colors.error },
+  submit: { marginTop: spacing.xs },
 })

@@ -1,86 +1,138 @@
-import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect } from 'react'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { api } from '../api/client'
-import { navigate, setLiveSimulation, setPlayer, setShift, useAppDispatch, useAppSelector } from '../app/store'
+import { navigate, openLesson, setPlayer, useAppDispatch, useAppSelector } from '../app/store'
+import { Icon } from '../components/Icon'
+import { Logo } from '../components/Logo'
+import { CurriculumMap, currentLesson, lessonCounts, useLearningMap } from '../components/CurriculumMap'
 import { Text } from '../components/Typography'
-import { colors, radius, shadow } from '../helpers/theme'
+import { Avatar, Card, Pill, ProgressBar, Screen } from '../components/UI'
+import { XP_PER_LEVEL, levelProgress } from '../helpers/progression'
+import { colors, radius, spacing, type } from '../helpers/theme'
 
 export function HomePage() {
   const dispatch = useAppDispatch()
-  const { auth, shift, liveSimulation, wagonSessionId } = useAppSelector((state) => state.app)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const wagonLevels = useQuery({ queryKey: ['wagon-levels'], queryFn: api.getWagonLevels })
-  const passedLevels = wagonLevels.data?.levels.filter((level) => level.status === 'passed').length ?? 0
-  const totalLevels = wagonLevels.data?.levels.length ?? 0
-  const wagonProgress = totalLevels ? Math.round((passedLevels / totalLevels) * 100) : 0
-  useEffect(() => { api.profile().then((profile) => dispatch(setPlayer(profile.player))).catch(() => {}) }, [dispatch])
+  const { auth, wagonSessionId } = useAppSelector((state) => state.app)
+  const profile = useQuery({ queryKey: ['profile'], queryFn: api.profile })
+  const challenge = useQuery({ queryKey: ['weekly-challenge'], queryFn: api.weeklyChallenge })
+  const map = useLearningMap()
+  const current = currentLesson(map.data)
+  const { total, completed } = lessonCounts(map.data)
+  const allDone = total > 0 && completed === total
 
-  async function startClassic() {
-    setBusy(true); setError(null)
-    try { dispatch(setShift(await api.startSession())) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось начать смену') }
-    finally { setBusy(false) }
-  }
+  useEffect(() => { if (profile.data) dispatch(setPlayer(profile.data.player)) }, [dispatch, profile.data])
 
-  async function startLive() {
-    setBusy(true); setError(null)
-    try { dispatch(setLiveSimulation(await api.startLiveSimulation())) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось начать симуляцию') }
-    finally { setBusy(false) }
+  const name = auth?.player.username ?? 'проводник'
+  const xp = profile.data?.player.total_xp ?? auth?.player.total_xp ?? 0
+  const points = profile.data?.leaderboard_points_total ?? 0
+  const { level, inLevel, percent } = levelProgress(xp, profile.data?.level)
+
+  function continueTraining() {
+    if (wagonSessionId) dispatch(navigate('wagon'))
+    else if (current) dispatch(openLesson(current.lesson_id))
+    else dispatch(navigate('practice'))
   }
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <View><Text style={styles.brand}>ВСМ</Text><Text style={styles.brandCaption}>ВЫСОКОСКОРОСТНАЯ МАГИСТРАЛЬ</Text></View>
-        <Pressable onPress={() => dispatch(navigate('profile'))} style={styles.avatar}><Text style={styles.avatarText}>{auth?.player.username?.slice(0, 1).toUpperCase() ?? 'П'}</Text></Pressable>
-      </View>
-
-      <View style={styles.hero}>
-        <View style={styles.speedLine} /><View style={[styles.speedLine, styles.speedLineWhite]} /><View style={[styles.speedLine, styles.speedLineRed]} />
-        <Text style={styles.heroKicker}>ДВИЖЕНИЕ ОБЪЕДИНЯЕТ</Text>
-        <Text style={styles.heroTitle}>Добро пожаловать,{`\n`}{auth?.player.username ?? 'проводник'}</Text>
-        <Text style={styles.heroText}>Интерактивный тренажёр обслуживания пассажиров на борту ВСМ</Text>
-        <Pressable onPress={() => dispatch(navigate(wagonSessionId ? 'wagon' : 'wagon_lobby'))} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>{wagonSessionId ? 'Продолжить смену' : 'Начать обучение'}</Text><Text style={styles.primaryArrow}>→</Text>
+    <Screen>
+      <View style={styles.top}>
+        <Logo size={30} caption={false} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Профиль" onPress={() => dispatch(navigate('profile'))}>
+          <Avatar name={name} size={44} />
         </Pressable>
       </View>
 
-      <View style={styles.progressCard}>
-        <View><Text style={styles.cardKicker}>ВАШ ПРОГРЕСС</Text><Text style={styles.xp}>{auth?.player.total_xp ?? 0} <Text style={styles.xpUnit}>XP</Text></Text></View>
-        <View style={styles.level}><Text style={styles.levelNumber}>{Math.max(1, Math.floor((auth?.player.total_xp ?? 0) / 250) + 1)}</Text><Text style={styles.levelText}>уровень</Text></View>
+      <Text style={styles.greeting}>Здравствуйте, {name}</Text>
+
+      <View style={styles.levelRow} accessibilityLabel={`Уровень ${level}, ${inLevel} из ${XP_PER_LEVEL} XP до следующего`}>
+        <View style={styles.levelChip}>
+          <Icon name="star" size={16} color={colors.surface} strokeWidth={2.2} />
+          <Text style={styles.levelChipText}>Уровень {level}</Text>
+        </View>
+        <View style={{ flex: 1 }}><ProgressBar value={percent} height={8} label="XP до следующего уровня" /></View>
+        <Text style={styles.levelXp}>{inLevel}/{XP_PER_LEVEL} XP</Text>
+      </View>
+      <View style={styles.chips}>
+        <View style={styles.chip}><Icon name="progress" size={18} color={colors.action} /><Text style={styles.chipText}>{xp} XP всего</Text></View>
+        <View style={styles.chip}><Icon name="trophy" size={18} color={colors.action} /><Text style={styles.chipText}>{points} очков рейтинга</Text></View>
       </View>
 
-      <View style={styles.sectionRow}><Text style={styles.sectionTitle}>Модули обучения</Text><Pressable onPress={() => dispatch(navigate('scenarios'))}><Text style={styles.allLink}>Все →</Text></Pressable></View>
-      <Pressable onPress={() => dispatch(navigate('learning_map'))} style={styles.moduleCard}>
-        <View style={[styles.moduleIcon, styles.moduleIconBlue]}><Text style={styles.moduleIconText}>✦</Text></View>
-        <View style={styles.moduleBody}><Text style={styles.moduleTag}>МАРШРУТ</Text><Text style={styles.moduleTitle}>Уроки проводника</Text><Text style={styles.moduleText}>Открытые и пройденные уроки</Text></View><Text style={styles.moduleArrow}>→</Text>
-      </Pressable>
-      <Pressable disabled={busy} onPress={() => dispatch(navigate('wagon_lobby'))} style={styles.moduleCard}>
-        <View style={[styles.moduleIcon, styles.moduleIconBlue]}><Text style={styles.moduleIconText}>▣</Text></View>
-        <View style={styles.moduleBody}><Text style={styles.moduleTag}>{passedLevels} ИЗ {totalLevels || '—'} УРОВНЕЙ</Text><Text style={styles.moduleTitle}>Real-time вагон</Text><Text style={styles.moduleText}>Свободное перемещение, живые ситуации и пассажиры</Text><View style={styles.moduleProgress}><View style={[styles.moduleProgressFill, { width: `${Math.max(wagonSessionId ? 4 : 0, wagonProgress)}%` }]} /></View></View>
-        <Text style={styles.moduleArrow}>→</Text>
-      </Pressable>
-      <Pressable disabled={busy} onPress={shift?.session.status === 'active' ? () => dispatch(navigate('simulation')) : startClassic} style={styles.moduleCard}>
-        <View style={[styles.moduleIcon, styles.moduleIconRed]}><Text style={styles.moduleIconText}>✓</Text></View>
-        <View style={styles.moduleBody}><Text style={styles.moduleTag}>БАЗОВЫЙ КУРС</Text><Text style={styles.moduleTitle}>Стандарты обслуживания</Text><Text style={styles.moduleText}>Последовательные обращения пассажиров</Text></View><Text style={styles.moduleArrow}>→</Text>
-      </Pressable>
-      <Pressable disabled={busy} onPress={liveSimulation?.run.status === 'active' ? () => dispatch(navigate('live_simulation')) : startLive} style={styles.moduleCard}>
-        <View style={[styles.moduleIcon, styles.moduleIconGold]}><Text style={styles.moduleIconText}>◎</Text></View>
-        <View style={styles.moduleBody}><Text style={styles.moduleTag}>ДИАЛОГОВЫЙ ТРЕНАЖЁР</Text><Text style={styles.moduleTitle}>Разговор с пассажиром</Text><Text style={styles.moduleText}>Ветвящийся сценарий и оценка решений</Text></View><Text style={styles.moduleArrow}>→</Text>
-      </Pressable>
-      {error && <Text style={styles.error}>{error}</Text>}
-    </ScrollView>
+      <View style={styles.hero}>
+        <View style={styles.heroLines} pointerEvents="none">
+          <View style={[styles.line, styles.lineA]} />
+          <View style={[styles.line, styles.lineB]} />
+          <View style={[styles.line, styles.lineC]} />
+        </View>
+        <Text style={styles.heroKicker}>{wagonSessionId ? 'АКТИВНЫЙ РЕЙС' : allDone ? 'ПРОГРАММА ПРОЙДЕНА' : current ? `УРОК ${current.lesson_id}` : 'ПРОГРАММА'}</Text>
+        <Text style={styles.heroTitle}>
+          {wagonSessionId ? 'Рейс ещё идёт' : allDone ? 'Все доступные уроки пройдены' : current?.title ?? 'Загрузка программы'}
+        </Text>
+        <Text style={styles.heroMeta}>Пройдено уроков: {completed} из {total || '—'}</Text>
+        <View style={styles.heroProgress}>
+          <ProgressBar value={total ? (completed / total) * 100 : 0} color={colors.surface} trackColor="rgba(255,255,255,0.22)" height={6} label="Пройдено уроков" />
+        </View>
+        <Pressable accessibilityRole="button" onPress={continueTraining} style={({ pressed }) => [styles.heroButton, pressed && { opacity: 0.9 }]}>
+          <Text style={styles.heroButtonText}>{wagonSessionId ? 'Вернуться в вагон' : allDone ? 'Свободная практика' : 'Продолжить тренировку'}</Text>
+          <Icon name="chevronRight" size={20} color={colors.action} strokeWidth={2.2} />
+        </Pressable>
+      </View>
+
+      {challenge.data && (
+        <Card onPress={() => dispatch(navigate('practice'))} accessibilityLabel="Челлендж недели" style={styles.challenge}>
+          <View style={styles.challengeIcon}><Icon name="target" size={24} color={colors.action} /></View>
+          <View style={styles.challengeBody}>
+            <View style={styles.challengeTop}>
+              <Text style={styles.challengeTitle}>Челлендж недели</Text>
+              {challenge.data.completed
+                ? <Pill label="Выполнено" tone="success" />
+                : <Text style={styles.challengeReward}>+{challenge.data.reward_xp} XP</Text>}
+            </View>
+            <Text style={styles.challengeText}>Разные зачтённые рейсы в диалоговом тренажёре</Text>
+            <View style={styles.challengeProgress}>
+              <View style={{ flex: 1 }}>
+                <ProgressBar value={(Math.min(challenge.data.seed_variants, challenge.data.target) / Math.max(1, challenge.data.target)) * 100} label="Прогресс челленджа" />
+              </View>
+              <Text style={styles.challengeCount}>{Math.min(challenge.data.seed_variants, challenge.data.target)}/{challenge.data.target}</Text>
+            </View>
+          </View>
+        </Card>
+      )}
+
+      <CurriculumMap />
+    </Screen>
   )
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.soft }, content: { padding: 18, paddingBottom: 36 },
-  header: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }, brand: { color: colors.primary, fontSize: 29, fontWeight: '900', letterSpacing: -2 }, brandCaption: { color: colors.primary, fontSize: 7, fontWeight: '900', letterSpacing: .45, marginTop: -3 }, avatar: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSoft, borderWidth: 1, borderColor: '#CBD8FF' }, avatarText: { color: colors.primary, fontSize: 17, fontWeight: '900' },
-  hero: { minHeight: 290, overflow: 'hidden', borderRadius: 30, padding: 24, justifyContent: 'flex-end', backgroundColor: colors.primaryDark, ...shadow }, speedLine: { position: 'absolute', top: 46, right: -33, width: '80%', height: 40, borderRadius: 50, backgroundColor: colors.primaryLight, transform: [{ rotate: '-10deg' }] }, speedLineWhite: { top: 63, right: -50, height: 13, backgroundColor: '#FFFFFF' }, speedLineRed: { top: 82, right: -65, height: 9, width: '63%', backgroundColor: colors.critical }, heroKicker: { color: '#AFC4FF', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 }, heroTitle: { color: '#FFFFFF', fontSize: 29, lineHeight: 33, fontWeight: '900', marginTop: 7 }, heroText: { color: '#D4DDF6', fontSize: 13, lineHeight: 19, marginTop: 9, maxWidth: 310 }, primaryButton: { minHeight: 51, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 17, backgroundColor: colors.primaryLight, paddingHorizontal: 18, marginTop: 19 }, primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' }, primaryArrow: { color: '#FFFFFF', fontSize: 22, fontWeight: '900' },
-  progressCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderRadius: radius.lg, padding: 17, backgroundColor: colors.surface, marginTop: 14, borderWidth: 1, borderColor: colors.border }, cardKicker: { color: colors.muted, fontSize: 9, fontWeight: '900', letterSpacing: 1 }, xp: { color: colors.ink, fontSize: 26, fontWeight: '900', marginTop: 3 }, xpUnit: { color: colors.primary, fontSize: 13 }, level: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSoft, borderWidth: 5, borderColor: '#BED0FF' }, levelNumber: { color: colors.primary, fontSize: 18, fontWeight: '900' }, levelText: { color: colors.primary, fontSize: 7, fontWeight: '700' },
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 25, marginBottom: 10 }, sectionTitle: { color: colors.ink, fontSize: 19, fontWeight: '900' }, allLink: { color: colors.primary, fontSize: 12, fontWeight: '800' },
-  moduleCard: { minHeight: 112, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radius.lg, padding: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginBottom: 10 }, moduleIcon: { width: 53, height: 72, borderRadius: 17, alignItems: 'center', justifyContent: 'center' }, moduleIconBlue: { backgroundColor: colors.blueSoft }, moduleIconRed: { backgroundColor: '#FFE9EC' }, moduleIconGold: { backgroundColor: '#FFF2D8' }, moduleIconText: { color: colors.primary, fontSize: 21, fontWeight: '900' }, moduleBody: { flex: 1 }, moduleTag: { color: colors.primary, fontSize: 8, fontWeight: '900', letterSpacing: .7 }, moduleTitle: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 4 }, moduleText: { color: colors.muted, fontSize: 11, lineHeight: 15, marginTop: 4 }, moduleArrow: { color: colors.primary, fontSize: 20, fontWeight: '900' }, moduleProgress: { height: 5, borderRadius: 5, overflow: 'hidden', backgroundColor: '#E6EBF4', marginTop: 8 }, moduleProgressFill: { height: '100%', backgroundColor: colors.loyalty }, error: { color: colors.critical, textAlign: 'center', marginTop: 8 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 56 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.md },
+  levelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  levelChip: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 30, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: colors.action },
+  levelChipText: { ...type.label, fontWeight: '600', color: colors.surface },
+  levelXp: { ...type.label, color: colors.secondary },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  chipText: { ...type.secondary, fontWeight: '600', color: colors.ink },
+  greeting: { ...type.h1, color: colors.ink, marginTop: spacing.sm, marginBottom: spacing.sm },
+  hero: { borderRadius: radius.lg, padding: 20, backgroundColor: colors.primary, overflow: 'hidden' },
+  heroLines: { ...StyleSheet.absoluteFill },
+  line: { position: 'absolute', right: -40, borderRadius: 40, transform: [{ rotate: '-12deg' }] },
+  lineA: { top: 18, width: '72%', height: 30, backgroundColor: colors.action, opacity: 0.55 },
+  lineB: { top: 54, width: '60%', height: 6, backgroundColor: colors.surface, opacity: 0.9 },
+  lineC: { top: 66, width: '46%', height: 4, backgroundColor: colors.brandRed },
+  heroKicker: { ...type.label, color: '#BCCBFF', letterSpacing: 0.8, marginTop: 70 },
+  heroTitle: { ...type.h2, color: colors.surface, marginTop: 4 },
+  heroMeta: { ...type.secondary, color: '#D5DEFA', marginTop: 4 },
+  heroProgress: { marginTop: spacing.sm },
+  heroButton: { minHeight: 52, marginTop: spacing.md, borderRadius: radius.button, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  heroButtonText: { fontSize: 16, lineHeight: 22, fontWeight: '600', color: colors.action },
+  challenge: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, marginBottom: 0 },
+  challengeIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSoft },
+  challengeBody: { flex: 1 },
+  challengeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
+  challengeTitle: { ...type.cardTitle, color: colors.ink, flexShrink: 1 },
+  challengeReward: { ...type.label, color: colors.warningInk, fontWeight: '600' },
+  challengeText: { ...type.secondary, color: colors.secondary, marginTop: 2 },
+  challengeProgress: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  challengeCount: { ...type.label, color: colors.secondary },
 })

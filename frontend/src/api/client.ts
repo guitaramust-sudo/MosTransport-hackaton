@@ -1,6 +1,6 @@
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
-import type { AdminLearningSummary, AuthResult, Breakdown, LiveResult, LiveSimulation, Player, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonLevelsResponse, WagonStartResponse } from '../types'
+import type { AdminLearningSummary, LearningMap, LessonAnswerResult, LessonDetail, LessonFinalizeResult, MyLearning, AppNotification, ChallengeProgress, LeaderboardScope, ScopedLeaderboard, AuthResult, Breakdown, LiveResult, LiveSimulation, Player, Profile, SessionResponse, Situation, SituationResponse, Tokens, TurnResult, WagonClassesResponse, WagonLevelsResponse, WagonStartResponse } from '../types'
 
 const expoHost = Constants.expoConfig?.hostUri?.split(':')[0]
 const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'localhost'
@@ -9,8 +9,15 @@ const defaultHost = Platform.OS === 'android' ? (expoHost || '10.0.2.2') : 'loca
 const defaultBaseUrl = Platform.OS === 'web' ? '' : `http://${defaultHost}:8088`
 const baseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? defaultBaseUrl
 let tokens: Tokens | null = null
+let onSessionExpired: (() => void) | null = null
+
+export class SessionExpiredError extends Error {
+  constructor() { super('Сессия истекла. Войдите снова.') }
+}
 
 export function setTokens(value: Tokens | null) { tokens = value }
+/** Called once the access token is rejected and cannot be refreshed. */
+export function setSessionExpiredHandler(handler: (() => void) | null) { onSessionExpired = handler }
 export function getAccessToken() { return tokens?.access_token ?? null }
 
 export function getApiBaseUrl() { return baseUrl }
@@ -61,7 +68,13 @@ function normalizeBreakdown(response: Breakdown): Breakdown {
 }
 
 function normalizeProfile(response: Profile): Profile {
-  return { ...response, competencies: response.competencies ?? [] }
+  return {
+    ...response,
+    level: response.level ?? 1,
+    competencies: response.competencies ?? [],
+    achievements: response.achievements ?? [],
+    leaderboard_points_total: response.leaderboard_points_total ?? 0,
+  }
 }
 
 async function request<T>(path: string, method = 'GET', body?: object, retry = true): Promise<T> {
@@ -70,10 +83,23 @@ async function request<T>(path: string, method = 'GET', body?: object, retry = t
     headers: { 'Content-Type': 'application/json', ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
-  if (response.status === 401 && retry && tokens?.refresh_token && path !== '/auth/refresh') {
-    const refreshed = await request<AuthResult>('/auth/refresh', 'POST', { refresh_token: tokens.refresh_token }, false)
-    setTokens(refreshed.tokens)
-    return request<T>(path, method, body, false)
+  if (response.status === 401 && tokens && path !== '/auth/login' && path !== '/auth/refresh') {
+    if (retry && tokens.refresh_token) {
+      let refreshed: AuthResult | null = null
+      try {
+        refreshed = await request<AuthResult>('/auth/refresh', 'POST', { refresh_token: tokens.refresh_token }, false)
+      } catch {
+        refreshed = null
+      }
+      if (refreshed) {
+        setTokens(refreshed.tokens)
+        return request<T>(path, method, body, false)
+      }
+    }
+    // The session can no longer be renewed: drop it and send the user to sign in.
+    setTokens(null)
+    onSessionExpired?.()
+    throw new SessionExpiredError()
   }
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { error?: string }
@@ -91,8 +117,12 @@ export const api = {
   profile: async () => normalizeProfile(await request<Profile>('/api/profile')),
   registerPushSubscription: (platform: 'android' | 'ios', deviceToken: string) =>
     request<{ status: string }>('/api/me/push-subscriptions', 'POST', { platform, device_token: deviceToken }),
-  getLearningMap: () => request<{ chapters: Array<{ chapter_id: string; title: string; order: number; lessons: Array<{ lesson_id: string; title: string; order: number; status: 'locked' | 'unlocked' | 'completed' }> }> }>('/api/learning/map'),
-  getMyLearning: () => request<{ prize_balance: number; prize_next_expiry: string | null; shirt_threshold: number; shirt_progress: number }>('/api/me/learning'),
+  leaderboard: async (scope: LeaderboardScope) => {
+    const board = await request<ScopedLeaderboard>(`/api/leaderboards?scope=${scope}`)
+    return { ...board, entries: board.entries ?? [] }
+  },
+  weeklyChallenge: () => request<ChallengeProgress>('/api/challenges/weekly'),
+  notifications: async () => (await request<{ notifications: AppNotification[] | null }>('/api/notifications')).notifications ?? [],
   startSession: async () => normalizeSession(await request<SessionResponse>('/api/session/start', 'POST', {})),
   getSession: async (id: string) => normalizeSession(await request<SessionResponse>(`/api/session/${id}`)),
   finishSession: async (id: string) => normalizeBreakdown(await request<Breakdown>(`/api/session/${id}/finish`, 'POST', {})),
@@ -110,6 +140,14 @@ export const api = {
     request<LiveSimulation>(`/api/session/simulations/${id}/dialogue`, 'POST', body),
   getWagonClasses: () => request<WagonClassesResponse>('/api/wagon/classes'),
   getWagonLevels: () => request<WagonLevelsResponse>('/api/wagon/levels'),
+  learningMap: () => request<LearningMap>('/api/learning/map'),
+  lesson: (id: string) => request<LessonDetail>(`/api/learning/lessons/${encodeURIComponent(id)}`),
+  answerLesson: (id: string, questionId: string, optionId: string) =>
+    request<LessonAnswerResult>(`/api/learning/lessons/${encodeURIComponent(id)}/answers`, 'POST', { question_id: questionId, option_id: optionId }),
+  startLessonPractice: (id: string) =>
+    request<WagonStartResponse>(`/api/learning/lessons/${encodeURIComponent(id)}/practice`, 'POST', {}),
+  finalizeLesson: (id: string) => request<LessonFinalizeResult>(`/api/learning/lessons/${encodeURIComponent(id)}/finalize`, 'POST', {}),
+  myLearning: () => request<MyLearning>('/api/me/learning'),
   startWagonSession: (levelId: string) =>
     request<WagonStartResponse>('/api/session/wagon/start', 'POST', { level_id: levelId }),
 }
