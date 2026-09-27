@@ -64,7 +64,7 @@ export function HomePage() {
           <View style={[styles.line, styles.lineB]} />
           <View style={[styles.line, styles.lineC]} />
         </View>
-        <Text style={styles.heroKicker}>{wagonSessionId ? 'АКТИВНЫЙ РЕЙС' : allDone ? 'ПРОГРАММА ПРОЙДЕНА' : current ? `УРОК ${current.lesson_id}` : 'ПРОГРАММА'}</Text>
+        <Text style={styles.heroKicker}>{wagonSessionId ? 'АКТИВНЫЙ РЕЙС' : allDone ? 'ПРОГРАММА ПРОЙДЕНА' : current ? 'ТЕКУЩИЙ УРОК' : 'ПРОГРАММА'}</Text>
         <Text style={styles.heroTitle}>
           {wagonSessionId ? 'Рейс ещё идёт' : allDone ? 'Все доступные уроки пройдены' : current?.title ?? 'Загрузка программы'}
         </Text>

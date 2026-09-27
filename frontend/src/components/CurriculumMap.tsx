@@ -78,7 +78,7 @@ export function CurriculumMap() {
               const badge = lessonBadge(lesson.lesson_id)
               return (
                 <Station key={lesson.lesson_id}
-                  kicker={`Урок ${lesson.lesson_id}`} title={lesson.title} state={state} statusLabel={statusLabel(state)}
+                  kicker={`Урок ${lesson.order}`} title={lesson.title} state={state} statusLabel={statusLabel(state)}
                   isFirst={index === 0} isLast={index === chapter.lessons.length - 1}
                   travelledIn={lesson.status !== 'locked'} travelledOut={Boolean(next && next.status !== 'locked')}
                   trailing={badge ? <Badge id={badge} size={44} locked={lesson.status !== 'completed'} /> : undefined}

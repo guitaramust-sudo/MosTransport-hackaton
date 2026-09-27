@@ -102,7 +102,7 @@ export function ProfilePage() {
               <Card key={lesson.lesson_id} style={styles.badgeCard} onPress={lesson.status === 'locked' ? undefined : () => dispatch(openLesson(lesson.lesson_id))} accessibilityLabel={`Бейдж ${badgeTitles[badge]}`}>
                 <Badge id={badge} size={76} locked={!got} />
                 <Text style={[styles.badgeTitle, !got && { color: colors.secondary }]}>{badgeTitles[badge]}</Text>
-                <Text style={styles.badgeReason}>{got ? `Урок ${lesson.lesson_id} пройден` : `Пройдите урок ${lesson.lesson_id} «${lesson.title}»`}</Text>
+                <Text style={styles.badgeReason}>{got ? `Урок «${lesson.title}» пройден` : `Пройдите урок «${lesson.title}»`}</Text>
               </Card>
             )
           })}

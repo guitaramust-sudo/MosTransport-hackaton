@@ -206,7 +206,6 @@ function Result({ lesson, result, onRetryPractice, onRestart, onNext }: {
             <Text style={styles.prizeValue}>{myLearning.data.prize_balance}/{myLearning.data.prize_shirt_threshold}</Text>
           </View>
           <ProgressBar value={myLearning.data.prize_shirt_progress * 100} color={colors.gold} label="Прогресс к футболке" />
-          <Text style={styles.prizeNote}>До футболки ВСМ. Каждая запись действует 6 суток.</Text>
         </Card>
       )}
 
@@ -269,7 +268,7 @@ export function LessonPage() {
 
   const data = lesson.data
   return (
-    <Screen title={data.title} subtitle={`Урок ${data.lesson_id}`} onBack={back}>
+    <Screen title={data.title} subtitle={data.estimated_min ? `≈ ${data.estimated_min} мин` : undefined} onBack={back}>
       <Stepper current={step} />
       {step === 'theory' && <Theory cards={data.theory_cards} onDone={() => setStep(data.progress.theory_pass ? 'practice' : 'theory_check')} />}
       {step === 'theory_check' && <Quiz lessonId={data.lesson_id} questions={theoryQuestions} onPassed={() => { refreshLearning(); setStep('practice') }} />}
@@ -340,5 +339,4 @@ const styles = StyleSheet.create({
   debriefItem: { ...type.body, color: colors.ink },
   prizeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
   prizeValue: { ...type.cardTitle, color: colors.warningInk },
-  prizeNote: { ...type.secondary, color: colors.secondary, marginTop: spacing.xs },
 })
