@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAudioPlayer } from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { api, getWagonWebSocketUrl } from '../api/client'
@@ -54,6 +55,31 @@ function connectionLabel(status: string) {
 export function WagonPage() {
   const dispatch = useAppDispatch()
   const queryClient = useQueryClient()
+  const musicPlayer = useAudioPlayer(require('../../assets/audio/wagon_ambient.mp3'))
+  const [musicEnabled, setMusicEnabled] = useState(true)
+
+  useEffect(() => {
+    musicPlayer.loop = true
+    // The recording is quiet as well, for browsers that ignore the volume API.
+    musicPlayer.volume = 0.35
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      // Browsers allow sound after a gesture; starting the shift may be asynchronous.
+      const startOnGesture = () => musicPlayer.play()
+      document.addEventListener('pointerdown', startOnGesture, { once: true })
+      return () => {
+        document.removeEventListener('pointerdown', startOnGesture)
+        musicPlayer.pause()
+      }
+    }
+    musicPlayer.play()
+    return () => musicPlayer.pause()
+  }, [musicPlayer])
+
+  const toggleMusic = () => {
+    if (musicEnabled) musicPlayer.pause()
+    else musicPlayer.play()
+    setMusicEnabled(!musicEnabled)
+  }
   const { wagonSessionId: sessionId, wagonWsPath: wsPath, wagonSnapshot: snapshot, wagonConnection: connection, wagonSelectedSituationId: selectedId, lessonId, lessonPracticeSessionId } = useAppSelector((state) => state.app)
   const isLessonPractice = Boolean(sessionId && lessonId && lessonPracticeSessionId === sessionId)
   const lesson = useQuery({ queryKey: ['lesson', lessonId], queryFn: () => api.lesson(lessonId!), enabled: isLessonPractice })
@@ -187,26 +213,33 @@ export function WagonPage() {
     if (selectedId && snapshot && !activeById(selectedId)) dispatch(setWagonSelectedSituation(null))
   }, [activeById, dispatch, selectedId, snapshot])
 
-  const handleAnchorPress = (anchor: WagonAnchor) => {
+  const handleAnchorPress = (anchor: WagonAnchor, nearby: boolean, fromJoystick: boolean) => {
     if (!snapshot) return
     if (snapshot.wagon_state.player.moving) return
+    if (!nearby) { showToast(`Подойдите джойстиком: ${wagonAnchorLabels[anchor]}`); return }
     const isSeat = anchor.startsWith('seat_')
     const here = snapshot.wagon_state.player.at === anchor
-    // In a lesson, points of interest are places to walk to and inspect.
+    // Only a joystick arrival can register a new anchor on the server.
     if (!isSeat && (isLessonPractice || anchor !== servicePoint)) {
-      if (!here) { sendCommand({ type: 'move_to', anchor }); return }
+      if (!here) {
+        if (fromJoystick) {
+          if (anchor === servicePoint) setServiceRequested(true)
+          sendCommand({ type: 'move_to', anchor })
+        }
+        else showToast('Отпустите джойстик рядом с точкой')
+        return
+      }
       // Already standing here: act on the point instead of ignoring the tap.
       const inspectable = (objectsAtAnchor[anchor] ?? []).find((object) => !(snapshot.wagon_state.inspected_objects ?? []).includes(object) && (lesson.data?.required_object_ids ?? []).includes(object))
       if (inspectable) { sendCommand({ type: 'inspect', item: inspectable }); return }
-      if (anchor === servicePoint) { setServiceContext(null); setShowService(true); return }
+      if (anchor === servicePoint) { setShowService(true); return }
       showToast(`Вы уже здесь: ${wagonAnchorLabels[anchor]}`)
       return
     }
     if (anchor === servicePoint) {
-      setServiceContext(null)
-      setServiceRequested(true)
       if (snapshot.wagon_state.player.at === anchor) { setServiceRequested(false); setShowService(true) }
-      else sendCommand({ type: 'move_to', anchor })
+      else if (fromJoystick) { setServiceRequested(true); sendCommand({ type: 'move_to', anchor }) }
+      else showToast('Отпустите джойстик рядом с сервисной точкой')
       return
     }
     const active = snapshot.active_situations.find((item) => item.seat_anchor === anchor)
@@ -214,8 +247,10 @@ export function WagonPage() {
     if (isNearSituation(active)) { openSituation(active.situation_id); return }
     const seat = seatForSituation(active)
     const target = seat?.actor.at ?? anchor
-    setPendingSituationId(active.situation_id)
-    sendCommand({ type: 'move_to', anchor: target })
+    if (fromJoystick) {
+      setPendingSituationId(active.situation_id)
+      sendCommand({ type: 'move_to', anchor: target })
+    } else showToast('Отпустите джойстик рядом с пассажиром')
   }
 
   const perform = async (work: () => Promise<unknown>) => {
@@ -297,8 +332,8 @@ export function WagonPage() {
     const targetSeat = targetSituation ? seatForSituation(targetSituation) : undefined
     if (!targetSituation || !targetSeat) { setServiceContext(null); setShowService(false); return }
     setShowService(false)
-    setPendingSituationId(serviceContext.situationId)
-    sendCommand({ type: 'move_to', anchor: targetSeat.actor.at })
+    if (snapshot.wagon_state.player.at === targetSeat.actor.at && !awayFromAnchor) openSituation(serviceContext.situationId)
+    else showToast('Подойдите к пассажиру джойстиком')
   }
 
   const visited = new Set<string>(snapshot.wagon_state.visited_anchors ?? [])
@@ -319,9 +354,8 @@ export function WagonPage() {
   // The inventory opens the service point, where items are picked up.
   const openInventory = () => {
     setServiceContext(null)
-    setServiceRequested(true)
-    if (player.at === servicePoint && !player.moving) setShowService(true)
-    else sendCommand({ type: 'move_to', anchor: servicePoint })
+    if (player.at === servicePoint && !player.moving && !awayFromAnchor) setShowService(true)
+    else showToast('Подойдите к сервисной точке джойстиком')
   }
 
   const sendPhysical = (command: WagonCommand) => {
@@ -336,7 +370,10 @@ export function WagonPage() {
         <View style={styles.hud} pointerEvents="box-none">
           <View style={styles.topRow}>
             <View style={styles.brand}><Text style={styles.brandText}>ВСМ</Text><View><Text style={styles.shiftLabel}>СМЕНА В ПУТИ</Text><Text style={styles.timer}>{formatTime(remaining)}</Text></View></View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
+            <View style={styles.topActions}>
+              <Pressable accessibilityRole="button" accessibilityLabel={musicEnabled ? 'Выключить музыку' : 'Включить музыку'} onPress={toggleMusic} style={[styles.musicButton, !musicEnabled && styles.musicButtonMuted]}><Text style={styles.musicButtonText}>{musicEnabled ? '♫' : '♪'}</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
+            </View>
           </View>
           {connection !== 'connected' && (
             <View style={styles.statusRow}>
@@ -356,12 +393,12 @@ export function WagonPage() {
                   <Text style={styles.goalText}>Заметьте пассажира, подойдите и выясните его просьбу в разговоре.</Text>
                 ) : next ? (
                   <Pressable accessibilityRole="button" accessibilityLabel={`${next.verb}: ${next.label}`}
-                    disabled={!next.target || Boolean(player.moving) || player.at === next.target}
-                    onPress={() => { if (next.target && player.at !== next.target) sendCommand({ type: 'move_to', anchor: next.target }) }}
+                    disabled={!next.target || Boolean(player.moving)}
+                    onPress={() => showToast(`Подойдите джойстиком: ${next.label}`)}
                     style={styles.goalRow}>
                     <View style={styles.goalCheck} />
                     <Text style={styles.goalText}>{next.verb}: {next.label}</Text>
-                    {next.target && player.at !== next.target && <Text style={styles.goalGo}>Идти →</Text>}
+                    {next.target && player.at !== next.target && <Text style={styles.goalGo}>Джойстик →</Text>}
                   </Pressable>
                 ) : (
                   <View style={styles.goalRow}>
@@ -373,7 +410,7 @@ export function WagonPage() {
             )
           })()}
           {toast && <View style={styles.movingToast}><Text style={styles.movingText}>{toast}</Text></View>}
-          {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Подходим к пассажиру…</Text></View>}
+          {pendingSituationId && <View style={styles.movingToast}><ActivityIndicator size="small" color="#FFFFFF" /><Text style={styles.movingText}>Открываем обращение…</Text></View>}
         </View>
       </View>
       {isLessonPractice && !selectedId && !showService && inspectHere.length > 0 && (
@@ -431,7 +468,7 @@ export function WagonPage() {
               {requirement && !detail.physical_action_done && <View style={styles.physicalCard}>
                 <View style={styles.physicalText}><Text style={styles.physicalTitle}>{requirement.kind === 'deliver_item' ? `Передайте: ${wagonItemLabels[requirement.item]}` : 'Верните пассажира на место'}</Text><Text style={styles.physicalHint}>Сначала подойдите к нужной точке в вагоне</Text></View>
                 {requirement.kind === 'deliver_item' && carried.includes(requirement.item) && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'give_item', situation_id: selectedId, item: requirement.item })} style={styles.smallButton}><Text style={styles.smallButtonText}>Передать</Text></Pressable>}
-                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); setServiceRequested(true); if (snapshot.wagon_state.player.at === servicePoint) setShowService(true); else sendCommand({ type: 'move_to', anchor: servicePoint }) }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
+                {requirement.kind === 'deliver_item' && !carried.includes(requirement.item) && <Pressable onPress={() => { setServiceContext({ situationId: selectedId, item: requirement.item }); dispatch(setWagonSelectedSituation(null)); if (snapshot.wagon_state.player.at === servicePoint && !awayFromAnchor) setShowService(true); else showToast('Подойдите к сервисной точке джойстиком') }} style={styles.smallButton}><Text style={styles.smallButtonText}>Взять</Text></Pressable>}
                 {requirement.kind === 'redirect' && nearSelected && <Pressable onPress={() => sendPhysical({ type: 'redirect', situation_id: selectedId })} style={styles.smallButton}><Text style={styles.smallButtonText}>Проводить</Text></Pressable>}
               </View>}
               <Text style={styles.helpLabel}>ВЫЗВАТЬ ПОМОЩЬ</Text>
@@ -467,7 +504,7 @@ export function WagonPage() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#DCE8F4' }, game: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.soft }, vsm: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }, vsmText: { color: '#FFF', fontSize: 23, fontWeight: '900' }, loadingTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' }, loadingText: { color: colors.muted }, errorText: { color: colors.critical, textAlign: 'center', padding: 16 },
-  hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] },
+  hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] }, musicButton: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, musicButtonMuted: { opacity: 0.55 }, musicButtonText: { color: colors.primary, fontSize: 24, fontWeight: '700' },
   statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   menuAction: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, marginTop: 10 },
   menuActionPrimary: { backgroundColor: colors.action, borderColor: colors.action },
