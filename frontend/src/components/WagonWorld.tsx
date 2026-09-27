@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, PanResponder, Pressable, StyleSheet, View } from 'react-native'
 import { Mesh, RepeatWrapping, SRGBColorSpace, Vector3, type Texture, type AnimationAction, type AnimationClip, type Group, type OrthographicCamera as ThreeOrthographicCamera } from 'three'
 import { conductorAsset, forestAsset, wagonAsset } from '../helpers/gameAssets'
 import { Canvas, canvasGl, OrthographicCamera, useAnimations, useFrame, useGLTF, textureSource, useTexture, useThree, useWagonScene } from '../helpers/three'
@@ -9,7 +9,7 @@ import type { WagonActor, WagonAnchor, WagonSeat, WagonSituationType, WagonSnaps
 import { Text } from './Typography'
 import { WagonBlanket } from './WagonBlanket'
 import { prepareWagonScene } from '../helpers/wagonScene'
-import { getActiveNavGrid, nearestFree } from '../helpers/navGrid'
+import { getActiveNavGrid, isWalkable, nearestFree } from '../helpers/navGrid'
 
 useGLTF.preload(wagonAsset)
 useGLTF.preload(conductorAsset)
@@ -20,11 +20,22 @@ interface WagonWorldProps {
   onAnchorPress: (anchor: WagonAnchor) => void
   /** Lessons show their own task card, so the generic hint can be turned off. */
   showHint?: boolean
+  /** Reports whether the conductor has walked away from the anchor the server has them at. */
+  onAwayChange?: (away: boolean) => void
 }
 
 interface PlayerPosition { x: number; y: number; z: number }
 interface Marker { anchor: WagonAnchor; x: number; y: number; visible: boolean; icon: string; active: boolean }
 interface FreeWalkTarget { x: number; z: number; request: number }
+/** Joystick deflection in screen space, each axis -1..1 (y grows downwards). */
+interface JoystickState { active: boolean; x: number; y: number }
+const JOYSTICK_RADIUS = 48
+// Drags shorter than this stay taps (walk to point / press marker).
+const JOYSTICK_DEAD_ZONE = 10
+// A tap still counts as a click after this much pointer travel (px).
+const CLICK_SLOP = 6
+// Direction offsets (radians) tried when the straight step is blocked.
+const STEER_ANGLES = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]
 const AISLE_X = 0.47
 const FLOOR_Y = 0.245
 const WALK_SPEED = 2.6
@@ -69,7 +80,7 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
   })
 
   return (
-    <group ref={group} onPointerDown={(event) => { event.stopPropagation(); onPress() }}>
+    <group ref={group} onClick={(event) => { event.stopPropagation(); if (event.delta <= CLICK_SLOP) onPress() }}>
       <mesh position={[0, 0.76, 0]}><capsuleGeometry args={[0.18, 0.36, 6, 12]} /><meshStandardMaterial color={color} /></mesh>
       <group ref={head} position={[0, 1.19, 0]}>
         <mesh><sphereGeometry args={[0.19, 20, 20]} /><meshStandardMaterial color="#F1BE94" /></mesh>
@@ -81,7 +92,10 @@ function Passenger({ seat, type, onPress }: { seat: WagonSeat; type?: WagonSitua
   )
 }
 
-function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; freeTarget: FreeWalkTarget | null; playerPosition: MutableRefObject<PlayerPosition> }) {
+function Conductor({ actor, freeTarget, playerPosition, joystick }: { actor: WagonActor; freeTarget: FreeWalkTarget | null; playerPosition: MutableRefObject<PlayerPosition>; joystick: MutableRefObject<JoystickState> }) {
+  const { camera } = useThree()
+  const screenRight = useRef(new Vector3())
+  const screenUp = useRef(new Vector3())
   const model = useGLTF(conductorAsset) as unknown as { scene: Group; animations: AnimationClip[] }
   const group = useRef<Group>(null)
   const previousMoving = useRef(false)
@@ -141,7 +155,40 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
         localTravelled.current = 0
         localMode.current = true
       }
-      if (localMode.current && localRoute.current) {
+      const stick = joystick.current
+      const strength = Math.min(1, Math.hypot(stick.x, stick.y))
+      if (stick.active && strength > 0.15) {
+        // Screen directions projected onto the floor, so "up" on the stick is
+        // "away from the camera" whichever way the camera looks.
+        screenRight.current.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize()
+        screenUp.current.setFromMatrixColumn(camera.matrixWorld, 1).setY(0).normalize()
+        const dx = screenRight.current.x * stick.x - screenUp.current.x * stick.y
+        const dz = screenRight.current.z * stick.x - screenUp.current.z * stick.y
+        const length = Math.hypot(dx, dz) || 1
+        const step = WALK_SPEED * strength * delta
+        const from = visualPosition.current
+        const grid = getActiveNavGrid()
+        // Standing in a blocked cell (e.g. pushed there by a seat) must not trap
+        // the conductor: any step out is allowed until they are back on free floor.
+        const stuck = grid ? !isWalkable(grid, visualPosition.current) : false
+        const walkable = (x: number, z: number) => stuck || !grid || isWalkable(grid, { x, z })
+        // Try the stick direction first, then gradually turned ones, so the
+        // conductor slides along walls and into narrow passages instead of stopping.
+        const heading = Math.atan2(dx / length, dz / length)
+        let next: { x: number; z: number } | null = null
+        for (const turn of STEER_ANGLES) {
+          const angle = heading + turn
+          const candidate = { x: from.x + Math.sin(angle) * step, z: from.z + Math.cos(angle) * step }
+          if (walkable(candidate.x, candidate.z)) { next = candidate; break }
+        }
+        localMode.current = true
+        localRoute.current = null
+        group.current.rotation.y = Math.atan2(dx, dz)
+        if (next) {
+          visualPosition.current = { x: next.x, y: FLOOR_Y, z: next.z }
+          moving = true
+        }
+      } else if (localMode.current && localRoute.current) {
         const route = localRoute.current
         const length = routeLengthOf(route)
         localTravelled.current = Math.min(length, localTravelled.current + delta * WALK_SPEED)
@@ -151,7 +198,7 @@ function Conductor({ actor, freeTarget, playerPosition }: { actor: WagonActor; f
           group.current.rotation.y = point.heading
           moving = true
         }
-      } else {
+      } else if (!localMode.current) {
         visualPosition.current = conductorPoint(actor.at)
       }
     }
@@ -218,6 +265,40 @@ function ForestGround() {
   )
 }
 
+// The cab shell sits over the front vestibule in the top-down view: fade it
+// while the conductor is in there, show it fully everywhere else.
+const CAB_FADE_FROM_Z = 6.2
+function CabFade({ scene, playerPosition }: { scene: Group; playerPosition: MutableRefObject<PlayerPosition> }) {
+  const opacity = useRef(1)
+  useFrame((_, delta) => {
+    const meshes = (scene.userData.vsmCabMeshes ?? []) as Mesh[]
+    const target = playerPosition.current.z > CAB_FADE_FROM_Z ? 0.15 : 1
+    if (Math.abs(opacity.current - target) < 0.005) return
+    opacity.current += (target - opacity.current) * Math.min(1, delta * 6)
+    for (const mesh of meshes) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      for (const material of materials) {
+        material.opacity = opacity.current
+        material.depthWrite = opacity.current > 0.95
+      }
+    }
+  })
+  return null
+}
+
+// Farther than this from the server anchor, actions tied to that spot are hidden.
+const AWAY_DISTANCE = 0.9
+function AwayWatcher({ actor, playerPosition, onAwayChange }: { actor: WagonActor; playerPosition: MutableRefObject<PlayerPosition>; onAwayChange?: (away: boolean) => void }) {
+  const away = useRef(false)
+  useFrame(() => {
+    if (!onAwayChange || actor.moving) return
+    const anchor = conductorPoint(actor.at)
+    const next = Math.hypot(anchor.x - playerPosition.current.x, anchor.z - playerPosition.current.z) > AWAY_DISTANCE
+    if (next !== away.current) { away.current = next; onAwayChange(next) }
+  })
+  return null
+}
+
 function poiIcon(anchor: WagonAnchor) {
   if (anchor === 'service_point' || anchor === 'service_zone') return '+'
   if (anchor === 'staff_zone' || anchor === 'cab_entrance_boundary') return '⌁'
@@ -251,12 +332,11 @@ function MarkerProjector({ snapshot, onProject }: { snapshot: WagonSnapshot; onP
   return null
 }
 
-function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, onProject }: WagonWorldProps & { freeTarget: FreeWalkTarget | null; onFreeTarget: (x: number, z: number) => void; onProject: (value: Marker[]) => void }) {
+function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, onProject, joystick, playerPosition, onAwayChange }: WagonWorldProps & { freeTarget: FreeWalkTarget | null; onFreeTarget: (x: number, z: number) => void; onProject: (value: Marker[]) => void; joystick: MutableRefObject<JoystickState>; playerPosition: MutableRefObject<PlayerPosition> }) {
   const modelScene = useWagonScene()
   // Game copy of the model: walkway blockers and the cab shell hidden, floor
   // layers ordered, walkability grid built.
   const wagonScene = useMemo(() => prepareWagonScene(modelScene), [modelScene])
-  const playerPosition = useRef<PlayerPosition>(interpolateConductor(snapshot.wagon_state.player))
   const situations = new Map(snapshot.active_situations.map((item) => [item.seat_anchor, item.type]))
   return (
     <>
@@ -269,10 +349,10 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
       <mesh
         position={[0, FLOOR_Y + 0.012, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
-        onPointerDown={(event) => {
+        onClick={(event) => {
           event.stopPropagation()
-          if (disabled) return
-          // Any floor tap walks to the nearest aisle point at that depth.
+          // Drags belong to the joystick; only real taps walk to a point.
+          if (disabled || event.delta > CLICK_SLOP) return
           onFreeTarget(event.point.x, event.point.z)
         }}
       >
@@ -280,14 +360,16 @@ function Scene({ snapshot, disabled, freeTarget, onAnchorPress, onFreeTarget, on
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {snapshot.wagon_state.seats.map((seat) => <Passenger key={seat.anchor} seat={seat} type={situations.get(seat.anchor)} onPress={() => { if (!disabled && situations.has(seat.anchor)) onAnchorPress(seat.anchor) }} />)}
-      <Conductor actor={snapshot.wagon_state.player} freeTarget={freeTarget} playerPosition={playerPosition} />
+      <Conductor actor={snapshot.wagon_state.player} freeTarget={freeTarget} playerPosition={playerPosition} joystick={joystick} />
+      <CabFade scene={wagonScene as Group} playerPosition={playerPosition} />
+      <AwayWatcher actor={snapshot.wagon_state.player} playerPosition={playerPosition} onAwayChange={onAwayChange} />
       <MarkerProjector snapshot={snapshot} onProject={onProject} />
       <CameraFollow playerPosition={playerPosition} />
     </>
   )
 }
 
-export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true }: WagonWorldProps) {
+export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true, onAwayChange }: WagonWorldProps) {
   const [markers, setMarkers] = useState<Marker[]>([])
   const [freeTarget, setFreeTarget] = useState<FreeWalkTarget | null>(null)
   // The onboarding hint goes away once the player has tapped anything.
@@ -305,11 +387,64 @@ export function WagonWorld({ snapshot, disabled, onAnchorPress, showHint = true 
     setVisualTarget(target.x, target.z)
     onAnchorPress(anchor)
   }
+
+  // Shadow joystick: appears where a drag starts, grey and translucent, and
+  // disappears on release. Taps without movement keep their old meaning.
+  const playerPosition = useRef<PlayerPosition>(interpolateConductor(snapshot.wagon_state.player))
+  const joystick = useRef<JoystickState>({ active: false, x: 0, y: 0 })
+  const [stick, setStick] = useState<{ ox: number; oy: number; kx: number; ky: number } | null>(null)
+  const latest = useRef({ snapshot, disabled, handleAnchorPress })
+  latest.current = { snapshot, disabled, handleAnchorPress }
+  const releaseStick = () => {
+    joystick.current = { active: false, x: 0, y: 0 }
+    setStick(null)
+    // Stopping next to a point of interest or a waiting passenger approaches it.
+    const { snapshot: snap, handleAnchorPress: approach } = latest.current
+    const here = playerPosition.current
+    const candidates: WagonAnchor[] = [
+      ...pointsOfInterestFor(snap.wagon_state.class_id),
+      ...snap.active_situations.map((item) => item.seat_anchor),
+    ]
+    let nearest: { anchor: WagonAnchor; distance: number } | null = null
+    for (const anchor of candidates) {
+      if (snap.wagon_state.player.at === anchor) continue
+      const seat = snap.wagon_state.seats.find((item) => item.anchor === anchor)
+      const point = conductorPoint(seat?.actor.at ?? anchor)
+      const distance = Math.hypot(point.x - here.x, point.z - here.z)
+      if (distance < 0.9 && (!nearest || distance < nearest.distance)) nearest = { anchor, distance }
+    }
+    if (nearest) approach(nearest.anchor)
+  }
+  const pan = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, gesture) => !latest.current.disabled && Math.hypot(gesture.dx, gesture.dy) > JOYSTICK_DEAD_ZONE,
+    onPanResponderGrant: (event, gesture) => {
+      setInteracted(true)
+      const ox = event.nativeEvent.locationX - gesture.dx
+      const oy = event.nativeEvent.locationY - gesture.dy
+      setStick({ ox, oy, kx: 0, ky: 0 })
+    },
+    onPanResponderMove: (_, gesture) => {
+      const length = Math.hypot(gesture.dx, gesture.dy)
+      const scale = length > JOYSTICK_RADIUS ? JOYSTICK_RADIUS / length : 1
+      const kx = gesture.dx * scale
+      const ky = gesture.dy * scale
+      joystick.current = { active: true, x: kx / JOYSTICK_RADIUS, y: ky / JOYSTICK_RADIUS }
+      setStick((current) => (current ? { ...current, kx, ky } : current))
+    },
+    onPanResponderRelease: releaseStick,
+    onPanResponderTerminate: releaseStick,
+    onPanResponderTerminationRequest: () => false,
+  }), [])
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...pan.panHandlers}>
       <Canvas style={styles.canvas} shadows gl={canvasGl}>
-        <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} freeTarget={freeTarget} onAnchorPress={handleAnchorPress} onFreeTarget={setVisualTarget} onProject={setMarkers} /></Suspense>
+        <Suspense fallback={null}><Scene snapshot={snapshot} disabled={disabled} freeTarget={freeTarget} onAnchorPress={handleAnchorPress} onFreeTarget={setVisualTarget} onProject={setMarkers} joystick={joystick} playerPosition={playerPosition} onAwayChange={onAwayChange} /></Suspense>
       </Canvas>
+      {stick && (
+        <View pointerEvents="none" style={[styles.stickBase, { left: stick.ox - JOYSTICK_RADIUS - 8, top: stick.oy - JOYSTICK_RADIUS - 8 }]}>
+          <View style={[styles.stickKnob, { transform: [{ translateX: stick.kx }, { translateY: stick.ky }] }]} />
+        </View>
+      )}
       {markers.map((marker) => marker.visible && (
         <Pressable key={marker.anchor} accessibilityRole="button" accessibilityLabel={wagonAnchorLabels[marker.anchor]} hitSlop={8} disabled={disabled} onPress={() => handleAnchorPress(marker.anchor)} style={[styles.marker, marker.active && styles.markerActive, restrictedAnchors.has(marker.anchor) && styles.markerRestricted, { left: marker.x - 20, top: marker.y - 20 }]}>
           <Text style={[styles.markerText, !marker.active && styles.markerTextQuiet]}>{marker.icon}</Text>
@@ -327,5 +462,7 @@ const styles = StyleSheet.create({
   markerActive: { width: 46, height: 46, borderRadius: 23, marginLeft: -3, marginTop: -3, backgroundColor: '#FFFFFF', borderWidth: 3, borderColor: colors.loyalty },
   markerRestricted: { borderColor: colors.critical }, markerText: { fontSize: 20, color: colors.primary, fontWeight: '900' }, markerTextQuiet: { fontSize: 16 },
   tip: { position: 'absolute', left: 20, right: 20, bottom: 104, alignItems: 'center' },
+  stickBase: { position: 'absolute', width: (JOYSTICK_RADIUS + 8) * 2, height: (JOYSTICK_RADIUS + 8) * 2, borderRadius: JOYSTICK_RADIUS + 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(60, 64, 72, 0.22)', borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.35)' },
+  stickKnob: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(40, 44, 52, 0.45)', borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.5)' },
   tipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', backgroundColor: 'rgba(16,26,61,.72)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99 },
 })

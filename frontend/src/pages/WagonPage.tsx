@@ -66,6 +66,8 @@ export function WagonPage() {
   const [serviceContext, setServiceContext] = useState<{ situationId: string; item: WagonItem } | null>(null)
   const [message, setMessage] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  // Walked off with the joystick: the spot-bound actions (inspect) don't apply.
+  const [awayFromAnchor, setAwayFromAnchor] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string) => {
@@ -283,7 +285,6 @@ export function WagonPage() {
 
   const duration = snapshot.wagon_state.duration_s || 480
   const remaining = Math.max(0, duration - snapshot.game_time_s)
-  const progress = Math.max(0, Math.min(1, snapshot.game_time_s / duration))
   const carried = snapshot.wagon_state.carried_items ?? []
   const active = selectedId ? activeById(selectedId) : undefined
   const detail = situation.data?.situation
@@ -311,7 +312,7 @@ export function WagonPage() {
   ] : []
   const goalsDone = goals.filter((goal) => goal.done).length
   const player = snapshot.wagon_state.player
-  const inspectHere = isLessonPractice && !player.moving
+  const inspectHere = isLessonPractice && !player.moving && !awayFromAnchor
     ? (objectsAtAnchor[player.at] ?? []).filter((object) => !inspected.has(object) && (lesson.data?.required_object_ids ?? []).includes(object))
     : []
 
@@ -331,13 +332,12 @@ export function WagonPage() {
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.game}>
-        <WagonWorld snapshot={snapshot} disabled={busy || Boolean(selectedId) || Boolean(pendingSituationId) || showService || Boolean(snapshot.wagon_state.player.moving)} onAnchorPress={handleAnchorPress} showHint={!isLessonPractice} />
+        <WagonWorld snapshot={snapshot} disabled={busy || Boolean(selectedId) || Boolean(pendingSituationId) || showService || Boolean(snapshot.wagon_state.player.moving)} onAnchorPress={handleAnchorPress} showHint={!isLessonPractice} onAwayChange={setAwayFromAnchor} />
         <View style={styles.hud} pointerEvents="box-none">
           <View style={styles.topRow}>
             <View style={styles.brand}><Text style={styles.brandText}>ВСМ</Text><View><Text style={styles.shiftLabel}>СМЕНА В ПУТИ</Text><Text style={styles.timer}>{formatTime(remaining)}</Text></View></View>
             <Pressable accessibilityRole="button" accessibilityLabel="Пауза" onPress={openMenu} style={styles.menu}><Text style={styles.menuText}>Ⅱ</Text></Pressable>
           </View>
-          <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
           {connection !== 'connected' && (
             <View style={styles.statusRow}>
               <View style={[styles.connection, styles.connectionWarn]}><View style={[styles.connectionDot, styles.connectionDotWarn]} /><Text style={styles.connectionText}>{connectionLabel(connection)}</Text></View>
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#DCE8F4' }, game: { flex: 1 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.soft }, vsm: { width: 76, height: 76, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }, vsmText: { color: '#FFF', fontSize: 23, fontWeight: '900' }, loadingTitle: { color: colors.ink, fontSize: 20, fontWeight: '900' }, loadingText: { color: colors.muted }, errorText: { color: colors.critical, textAlign: 'center', padding: 16 },
   hud: { position: 'absolute', left: 14, right: 14, top: 12 }, topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, backgroundColor: 'rgba(255,255,255,.94)', paddingHorizontal: 12, paddingVertical: 9, ...shadow }, brandText: { color: colors.primary, fontSize: 22, fontWeight: '900', letterSpacing: -1 }, shiftLabel: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: .8 }, timer: { color: colors.ink, fontSize: 15, fontWeight: '900', marginTop: 1 }, menu: { width: 45, height: 45, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,.94)', ...shadow }, menuText: { color: colors.primary, fontSize: 18, fontWeight: '900', transform: [{ rotate: '90deg' }] },
-  progressTrack: { height: 7, overflow: 'hidden', borderRadius: 9, backgroundColor: 'rgba(255,255,255,.85)', borderWidth: 1, borderColor: 'rgba(16,26,61,.14)', marginTop: 9 }, progressFill: { height: '100%', borderRadius: 9, backgroundColor: colors.loyalty }, statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, connection: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: 'rgba(255,255,255,.9)' }, connectionWarn: { backgroundColor: '#FFF5DF' }, connectionDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.safety }, connectionDotWarn: { backgroundColor: colors.warning }, connectionText: { color: colors.ink, fontSize: 10, fontWeight: '800' }, movingToast: { alignSelf: 'center', flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, backgroundColor: 'rgba(18,42,145,.88)' }, movingText: { color: '#FFF', fontSize: 11, fontWeight: '800' },
   menuAction: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, marginTop: 10 },
   menuActionPrimary: { backgroundColor: colors.action, borderColor: colors.action },
   menuActionPrimaryText: { color: '#FFF', fontSize: 15, fontWeight: '600' },

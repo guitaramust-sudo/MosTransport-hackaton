@@ -83,6 +83,12 @@ function centerOf(grid: NavGrid, r: number, c: number): FloorPoint {
 const free = (grid: NavGrid, r: number, c: number) =>
   r >= 0 && c >= 0 && r < grid.rows && c < grid.cols && grid.blocked[r * grid.cols + c] === 0
 
+/** True when a character can stand at p. */
+export function isWalkable(grid: NavGrid, p: FloorPoint) {
+  const { r, c } = cellOf(grid, p)
+  return free(grid, r, c)
+}
+
 /** Closest walkable point to p (breadth-first over the grid). */
 export function nearestFree(grid: NavGrid, p: FloorPoint): FloorPoint {
   const start = cellOf(grid, p)
